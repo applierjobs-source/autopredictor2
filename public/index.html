@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kalshi $10 Trade Bot</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 40px;
+        color: #111;
+      }
+      .container {
+        max-width: 760px;
+      }
+      button {
+        padding: 12px 18px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .status {
+        margin-top: 20px;
+        padding: 12px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #fafafa;
+        white-space: pre-wrap;
+      }
+      .muted {
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Kalshi $10 Trade Bot</h1>
+      <p class="muted">
+        Schedules one $10 trade every day at 9:00 AM CST and lets you place a
+        manual trade.
+      </p>
+      <button id="buyButton">Buy $10</button>
+      <div class="status" id="status">Waiting for trade...</div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
