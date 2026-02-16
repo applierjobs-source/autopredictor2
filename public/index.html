@@ -26,6 +26,24 @@
         background: #fafafa;
         white-space: pre-wrap;
       }
+      table.status {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      table.status th,
+      table.status td {
+        padding: 8px;
+        border-bottom: 1px solid #e5e5e5;
+        text-align: left;
+        vertical-align: top;
+      }
+      table.status th {
+        font-weight: 600;
+      }
+      .secondary {
+        background: #f2f4f7;
+      }
       .muted {
         color: #666;
       }
@@ -38,8 +56,32 @@
         Schedules one $10 trade every day at 9:00 AM CST and lets you place a
         manual trade.
       </p>
-      <button id="buyButton">Buy $10</button>
+      <div>
+        <button id="buyButton">Buy $10 (default)</button>
+        <button id="bestButton">Buy $10 (highest odds)</button>
+      </div>
       <div class="status" id="status">Waiting for trade...</div>
+
+      <h2>Expiring Today</h2>
+      <p class="muted">
+        Select a market to place a $10 trade. Odds reflect current YES ask.
+      </p>
+      <button id="refreshBets">Refresh list</button>
+      <div class="status" id="betsStatus">Loading markets...</div>
+      <table class="status" id="betsTable">
+        <thead>
+          <tr>
+            <th>Trade</th>
+            <th>Ticker</th>
+            <th>Title</th>
+            <th>Close</th>
+            <th>Yes Ask</th>
+            <th>Yes Bid</th>
+            <th>Last</th>
+          </tr>
+        </thead>
+        <tbody id="betsBody"></tbody>
+      </table>
     </div>
 
     <script src="/app.js"></script>
