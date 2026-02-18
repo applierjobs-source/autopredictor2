@@ -40,6 +40,7 @@ event list. It uses the Kalshi Trade API with RSA-PSS authentication.
 - `KALSHI_AUTO_STRATEGY`: `climate-daily` (default), `highest-odds`, or `fixed-ticker`.
 - `KALSHI_CLIMATE_CATEGORY`: Kalshi category for climate series (default `climate`).
 - `KALSHI_CLIMATE_FREQUENCY`: Kalshi series frequency filter (default `daily`).
+- `KALSHI_CLIMATE_TAG`: Tag to match climate series when category is missing (default `climate`).
 - `TRADE_AMOUNT_CENTS`: Trade size in cents (default `1000`).
 - `CLIMATE_TRADE_AMOUNT_CENTS`: Trade size per climate event (default `2000`).
 - `SCHEDULED_TRADES_ENABLED`: Set to `false` to disable 9am CST scheduling.

@@ -15,6 +15,7 @@ const MARKET_PAGE_LIMIT = Number(process.env.KALSHI_MARKET_PAGE_LIMIT || 500);
 const MARKET_TIMEZONE = process.env.KALSHI_MARKET_TIMEZONE || "America/Chicago";
 const CLIMATE_CATEGORY = process.env.KALSHI_CLIMATE_CATEGORY || "climate";
 const CLIMATE_FREQUENCY = process.env.KALSHI_CLIMATE_FREQUENCY || "daily";
+const CLIMATE_TAG = process.env.KALSHI_CLIMATE_TAG || "climate";
 const CLIMATE_TRADE_AMOUNT_CENTS = Number(
   process.env.CLIMATE_TRADE_AMOUNT_CENTS || 2000
 );
@@ -280,10 +281,29 @@ async function getEventsForSeries(seriesTicker) {
 }
 
 async function getClimateDailyEvents({ timeZone = MARKET_TIMEZONE } = {}) {
-  const series = await getSeriesList({ category: CLIMATE_CATEGORY });
-  const dailySeries = series.filter((item) =>
-    normalizeText(item?.frequency).includes(CLIMATE_FREQUENCY)
-  );
+  let series = await getSeriesList({ category: CLIMATE_CATEGORY });
+  if (!series.length) {
+    series = await getSeriesList({});
+  }
+
+  const dailySeries = series.filter((item) => {
+    const frequencyMatches = normalizeText(item?.frequency).includes(
+      CLIMATE_FREQUENCY
+    );
+    if (!frequencyMatches) return false;
+
+    const categoryMatches = normalizeText(item?.category).includes(
+      normalizeText(CLIMATE_CATEGORY)
+    );
+    const tagMatches = Array.isArray(item?.tags)
+      ? item.tags.some((tag) =>
+          normalizeText(tag).includes(normalizeText(CLIMATE_TAG))
+        )
+      : false;
+    const titleMatches = normalizeText(item?.title).includes("climate");
+
+    return categoryMatches || tagMatches || titleMatches;
+  });
 
   const todayKey = formatDateInTimeZone(new Date(), timeZone);
   const events = [];
