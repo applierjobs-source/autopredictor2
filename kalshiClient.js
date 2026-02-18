@@ -176,6 +176,13 @@ function extractYesPriceDollars(market) {
   );
 }
 
+function formatPriceDollars(value) {
+  const parsed = toNumber(value);
+  if (!Number.isFinite(parsed)) return null;
+  const normalized = Math.max(0.01, parsed);
+  return normalized.toFixed(4);
+}
+
 const CITY_GEOCODES = [
   { name: "New York City", aliases: ["nyc", "new york city", "new york"], geocode: "40.7128,-74.0060" },
   { name: "Chicago", aliases: ["chicago"], geocode: "41.8781,-87.6298" },
@@ -388,6 +395,15 @@ async function getSeriesList({ category, useSandbox } = {}) {
   const path = `/trade-api/v2/series?${params.toString()}`;
   const data = await kalshiRequest({ method: "GET", path, useSandbox });
   return Array.isArray(data?.series) ? data.series : [];
+}
+
+async function getMarketByTicker(ticker, { useSandbox } = {}) {
+  if (!ticker) {
+    throw new Error("Missing market ticker");
+  }
+  const path = `/trade-api/v2/markets/${ticker}`;
+  const data = await kalshiRequest({ method: "GET", path, useSandbox });
+  return data?.market || null;
 }
 
 async function getEventsPage({
@@ -727,7 +743,15 @@ async function placeClimateDailyTrades({ amountCents, useSandbox } = {}) {
   for (const event of events) {
     try {
       const decision = await decideClimateMarketForEvent(event);
-      const priceDollars = extractYesPriceDollars(decision.chosen);
+      let priceDollars = formatPriceDollars(
+        extractYesPriceDollars(decision.chosen)
+      );
+      if (!priceDollars) {
+        const market = await getMarketByTicker(decision.chosen?.ticker, {
+          useSandbox,
+        });
+        priceDollars = formatPriceDollars(extractYesPriceDollars(market));
+      }
       if (!priceDollars) {
         const error = new Error("Missing market price for order");
         error.details = { ticker: decision.chosen?.ticker };
@@ -858,6 +882,7 @@ async function placeHighestOddsTrade({ amountCents, useSandbox } = {}) {
 
   const top = marketsWithOdds[0];
   const priceCents = Math.max(1, Math.round(top.odds * 100));
+  const priceDollars = formatPriceDollars(top.odds);
   const trade = await placeKalshiTrade({
     amountCents,
     ticker: top.market.ticker,
@@ -865,7 +890,7 @@ async function placeHighestOddsTrade({ amountCents, useSandbox } = {}) {
     action: "buy",
     type: "market",
     contractPriceCents: priceCents,
-    priceDollars: top.odds,
+    priceDollars,
     useSandbox,
   });
 
