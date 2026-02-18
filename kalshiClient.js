@@ -4,6 +4,8 @@ const API_BASE = process.env.KALSHI_API_BASE || "https://api.kalshi.com";
 const SANDBOX_API_BASE = process.env.KALSHI_SANDBOX_API_BASE;
 const ACCESS_KEY = process.env.KALSHI_ACCESS_KEY;
 const PRIVATE_KEY_RAW = process.env.KALSHI_PRIVATE_KEY;
+const SANDBOX_ACCESS_KEY = process.env.KALSHI_SANDBOX_ACCESS_KEY;
+const SANDBOX_PRIVATE_KEY_RAW = process.env.KALSHI_SANDBOX_PRIVATE_KEY;
 const MARKET_TICKER = process.env.KALSHI_MARKET_TICKER;
 const ORDER_SIDE = process.env.KALSHI_ORDER_SIDE || "yes";
 const ORDER_ACTION = process.env.KALSHI_ORDER_ACTION || "buy";
@@ -49,15 +51,18 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getPrivateKey() {
-  if (!PRIVATE_KEY_RAW) return null;
-  return PRIVATE_KEY_RAW.replace(/\\n/g, "\n");
+function getPrivateKey(useSandbox) {
+  const raw = useSandbox ? SANDBOX_PRIVATE_KEY_RAW : PRIVATE_KEY_RAW;
+  if (!raw) return null;
+  return raw.replace(/\\n/g, "\n");
 }
 
-function createSignature({ timestamp, method, path }) {
-  const privateKey = getPrivateKey();
+function createSignature({ timestamp, method, path, useSandbox }) {
+  const privateKey = getPrivateKey(useSandbox);
   if (!privateKey) {
-    throw new Error("Missing KALSHI_PRIVATE_KEY");
+    throw new Error(
+      useSandbox ? "Missing KALSHI_SANDBOX_PRIVATE_KEY" : "Missing KALSHI_PRIVATE_KEY"
+    );
   }
 
   const message = `${timestamp}${method}${path}`;
@@ -70,9 +75,15 @@ function createSignature({ timestamp, method, path }) {
   return signature.toString("base64");
 }
 
-function requireAccessKey() {
-  if (!ACCESS_KEY) {
-    throw new Error("Missing KALSHI_ACCESS_KEY");
+function getAccessKey(useSandbox) {
+  return useSandbox ? SANDBOX_ACCESS_KEY : ACCESS_KEY;
+}
+
+function requireAccessKey(useSandbox) {
+  if (!getAccessKey(useSandbox)) {
+    throw new Error(
+      useSandbox ? "Missing KALSHI_SANDBOX_ACCESS_KEY" : "Missing KALSHI_ACCESS_KEY"
+    );
   }
 }
 
@@ -101,17 +112,18 @@ function resolveApiBase(useSandbox) {
 }
 
 async function kalshiRequest({ method, path, body, useSandbox }, attempt = 0) {
-  requireAccessKey();
+  requireAccessKey(useSandbox);
   const timestamp = Date.now().toString();
-  const signature = createSignature({ timestamp, method, path });
+  const signature = createSignature({ timestamp, method, path, useSandbox });
   const apiBase = resolveApiBase(useSandbox);
   const url = `${apiBase}${path}`;
+  const accessKey = getAccessKey(useSandbox);
 
   const response = await fetch(url, {
     method,
     headers: {
       "Content-Type": "application/json",
-      "KALSHI-ACCESS-KEY": ACCESS_KEY,
+      "KALSHI-ACCESS-KEY": accessKey,
       "KALSHI-ACCESS-SIGNATURE": signature,
       "KALSHI-ACCESS-TIMESTAMP": timestamp,
     },

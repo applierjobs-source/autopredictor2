@@ -46,6 +46,8 @@ event list. It uses the Kalshi Trade API with RSA-PSS authentication.
 - `SCHEDULED_TRADES_ENABLED`: Set to `false` to disable 9am CST scheduling.
 - `KALSHI_USE_SANDBOX`: Use sandbox by default for scheduled trades (default `false`).
 - `KALSHI_SANDBOX_API_BASE`: Base URL for Kalshi sandbox API.
+- `KALSHI_SANDBOX_ACCESS_KEY`: Sandbox API key ID.
+- `KALSHI_SANDBOX_PRIVATE_KEY`: Sandbox private key PEM (\\n for newlines).
 - `WEATHERCOMPANY_API_KEY`: Weather Company API key.
 - `WEATHERCOMPANY_API_BASE`: Weather Company API base URL (default `https://api.weather.com`).
 - `WEATHERCOMPANY_UNITS`: Weather Company units (default `e`).
