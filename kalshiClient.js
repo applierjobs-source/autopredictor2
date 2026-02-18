@@ -185,6 +185,63 @@ function parseCsv(value) {
     .filter(Boolean);
 }
 
+function parseEventDateFromTitle(title) {
+  const match = String(title || "").match(
+    /on\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})/i
+  );
+  if (!match) return null;
+  const month = match[1].slice(0, 3).toLowerCase();
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  const months = {
+    jan: 0,
+    feb: 1,
+    mar: 2,
+    apr: 3,
+    may: 4,
+    jun: 5,
+    jul: 6,
+    aug: 7,
+    sep: 8,
+    oct: 9,
+    nov: 10,
+    dec: 11,
+  };
+  if (!(month in months) || !day || !year) return null;
+  return new Date(Date.UTC(year, months[month], day));
+}
+
+function parseEventDateFromTicker(ticker) {
+  const match = String(ticker || "").match(/-(\d{2})([A-Z]{3})(\d{2})$/);
+  if (!match) return null;
+  const year = 2000 + Number(match[1]);
+  const month = match[2].toLowerCase();
+  const day = Number(match[3]);
+  const months = {
+    jan: 0,
+    feb: 1,
+    mar: 2,
+    apr: 3,
+    may: 4,
+    jun: 5,
+    jul: 6,
+    aug: 7,
+    sep: 8,
+    oct: 9,
+    nov: 10,
+    dec: 11,
+  };
+  if (!(month in months) || !day || !year) return null;
+  return new Date(Date.UTC(year, months[month], day));
+}
+
+function extractEventDate(event) {
+  return (
+    parseEventDateFromTitle(event?.title) ||
+    parseEventDateFromTicker(event?.event_ticker)
+  );
+}
+
 function findCityFromTitle(title) {
   const normalized = normalizeText(title);
   return CITY_GEOCODES.find((entry) =>
@@ -388,8 +445,9 @@ async function getClimateDailyEvents({
         event?.close_time ||
         event?.latest_expiration_time ||
         event?.expected_expiration_time;
-      if (!closeAt) return;
-      const closeKey = formatDateInTimeZone(new Date(closeAt), timeZone);
+      const eventDate = closeAt ? new Date(closeAt) : extractEventDate(event);
+      if (!eventDate) return;
+      const closeKey = formatDateInTimeZone(eventDate, timeZone);
       if (closeKey !== todayKey) return;
       events.push(event);
     });
@@ -407,8 +465,9 @@ async function getClimateDailyEvents({
           event?.close_time ||
           event?.latest_expiration_time ||
           event?.expected_expiration_time;
-        if (!closeAt) return;
-        upcoming.push({ event, closeAt });
+        const eventDate = closeAt ? new Date(closeAt) : extractEventDate(event);
+        if (!eventDate) return;
+        upcoming.push({ event, closeAt: eventDate.toISOString() });
       });
       await sleep(60);
     }
