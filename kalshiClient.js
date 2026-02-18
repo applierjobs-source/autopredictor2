@@ -665,4 +665,6 @@ module.exports = {
   getMarketsExpiringToday,
   getClimateDailyEvents,
   placeClimateDailyTrades,
+  getSeriesList,
+  getEventsForSeries,
 };

@@ -8,6 +8,8 @@ const {
   getMarketsExpiringToday,
   getClimateDailyEvents,
   placeClimateDailyTrades,
+  getSeriesList,
+  getEventsForSeries,
 } = require("./kalshiClient");
 
 const app = express();
@@ -80,6 +82,50 @@ app.get("/api/climate/events", async (req, res) => {
   } catch (error) {
     const errorPayload = {
       message: error?.message || "Failed to load climate events",
+      details: error?.details || null,
+    };
+    res.status(500).json({ error: errorPayload });
+  }
+});
+
+app.get("/api/kalshi/series", async (req, res) => {
+  try {
+    const useSandbox = parseBoolean(req.query?.sandbox) || sandboxByDefault;
+    const category = req.query?.category || undefined;
+    const series = await getSeriesList({ category, useSandbox });
+    const payload = series.map((item) => ({
+      ticker: item.ticker,
+      title: item.title,
+      frequency: item.frequency,
+      category: item.category,
+      tags: item.tags,
+    }));
+    res.json({ count: payload.length, series: payload.slice(0, 50) });
+  } catch (error) {
+    const errorPayload = {
+      message: error?.message || "Failed to load series",
+      details: error?.details || null,
+    };
+    res.status(500).json({ error: errorPayload });
+  }
+});
+
+app.get("/api/kalshi/series/:ticker/events", async (req, res) => {
+  try {
+    const useSandbox = parseBoolean(req.query?.sandbox) || sandboxByDefault;
+    const seriesTicker = req.params.ticker;
+    const events = await getEventsForSeries(seriesTicker, { useSandbox });
+    const payload = events.slice(0, 50).map((event) => ({
+      eventTicker: event.event_ticker,
+      title: event.title,
+      closeTime: event.close_time,
+      status: event.status,
+      marketsCount: Array.isArray(event.markets) ? event.markets.length : 0,
+    }));
+    res.json({ count: events.length, events: payload });
+  } catch (error) {
+    const errorPayload = {
+      message: error?.message || "Failed to load series events",
       details: error?.details || null,
     };
     res.status(500).json({ error: errorPayload });
