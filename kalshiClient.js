@@ -305,7 +305,6 @@ async function getEventsPage({
   const params = new URLSearchParams();
   params.set("limit", String(limit));
   params.set("with_nested_markets", "true");
-  params.set("status", "open");
   if (seriesTicker) params.set("series_ticker", seriesTicker);
   if (cursor) params.set("cursor", cursor);
 
@@ -385,13 +384,38 @@ async function getClimateDailyEvents({
   for (const entry of limitedSeries) {
     const seriesEvents = await getEventsForSeries(entry.ticker, { useSandbox });
     seriesEvents.forEach((event) => {
-      const closeAt = event?.close_time;
+      const closeAt =
+        event?.close_time ||
+        event?.latest_expiration_time ||
+        event?.expected_expiration_time;
       if (!closeAt) return;
       const closeKey = formatDateInTimeZone(new Date(closeAt), timeZone);
       if (closeKey !== todayKey) return;
       events.push(event);
     });
     await sleep(120);
+  }
+
+  if (!events.length) {
+    const upcoming = [];
+    for (const entry of limitedSeries) {
+      const seriesEvents = await getEventsForSeries(entry.ticker, {
+        useSandbox,
+      });
+      seriesEvents.forEach((event) => {
+        const closeAt =
+          event?.close_time ||
+          event?.latest_expiration_time ||
+          event?.expected_expiration_time;
+        if (!closeAt) return;
+        upcoming.push({ event, closeAt });
+      });
+      await sleep(60);
+    }
+    upcoming
+      .sort((a, b) => new Date(a.closeAt) - new Date(b.closeAt))
+      .slice(0, 50)
+      .forEach((entry) => events.push(entry.event));
   }
 
   climateEventsCache.set(cacheKey, {

@@ -72,7 +72,10 @@ app.get("/api/climate/events", async (req, res) => {
     const payload = events.map((event) => ({
       eventTicker: event.event_ticker,
       title: event.title,
-      closeTime: event.close_time,
+      closeTime:
+        event.close_time ||
+        event.latest_expiration_time ||
+        event.expected_expiration_time,
       markets: (event.markets || []).map((market) => ({
         ticker: market.ticker,
         label: market.yes_sub_title || market.title || market.ticker,
@@ -118,7 +121,10 @@ app.get("/api/kalshi/series/:ticker/events", async (req, res) => {
     const payload = events.slice(0, 50).map((event) => ({
       eventTicker: event.event_ticker,
       title: event.title,
-      closeTime: event.close_time,
+      closeTime:
+        event.close_time ||
+        event.latest_expiration_time ||
+        event.expected_expiration_time,
       status: event.status,
       marketsCount: Array.isArray(event.markets) ? event.markets.length : 0,
     }));
