@@ -727,12 +727,19 @@ async function placeClimateDailyTrades({ amountCents, useSandbox } = {}) {
   for (const event of events) {
     try {
       const decision = await decideClimateMarketForEvent(event);
+      const priceDollars = extractYesPriceDollars(decision.chosen);
+      if (!priceDollars) {
+        const error = new Error("Missing market price for order");
+        error.details = { ticker: decision.chosen?.ticker };
+        throw error;
+      }
       const trade = await placeKalshiTrade({
         amountCents: amountCents || CLIMATE_TRADE_AMOUNT_CENTS,
         ticker: decision.chosen.ticker,
         side: "yes",
         action: "buy",
         type: "market",
+        priceDollars,
         useSandbox,
       });
       trades.push({
@@ -773,6 +780,7 @@ async function placeKalshiTrade({
   type,
   count,
   price,
+  priceDollars,
   contractPriceCents,
   useSandbox,
 } = {}) {
@@ -795,6 +803,14 @@ async function placeKalshiTrade({
     count: resolvedCount,
     client_order_id: crypto.randomUUID(),
   };
+
+  if (priceDollars !== undefined && priceDollars !== null && priceDollars !== "") {
+    if (body.side === "yes") {
+      body.yes_price_dollars = String(priceDollars);
+    } else if (body.side === "no") {
+      body.no_price_dollars = String(priceDollars);
+    }
+  }
 
   if (body.type === "limit") {
     const fallbackPrice = process.env.KALSHI_LIMIT_PRICE;
@@ -849,6 +865,7 @@ async function placeHighestOddsTrade({ amountCents, useSandbox } = {}) {
     action: "buy",
     type: "market",
     contractPriceCents: priceCents,
+    priceDollars: top.odds,
     useSandbox,
   });
 
