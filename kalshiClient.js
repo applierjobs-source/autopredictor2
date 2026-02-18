@@ -174,6 +174,11 @@ const CITY_GEOCODES = [
     aliases: ["san antonio"],
     geocode: "29.4241,-98.4936",
   },
+  {
+    name: "Oklahoma City",
+    aliases: ["oklahoma city", "okc"],
+    geocode: "35.4676,-97.5164",
+  },
   { name: "Philadelphia", aliases: ["philadelphia"], geocode: "39.9526,-75.1652" },
   { name: "Seattle", aliases: ["seattle"], geocode: "47.6062,-122.3321" },
   { name: "San Francisco", aliases: ["san francisco", "sf"], geocode: "37.7749,-122.4194" },
@@ -512,44 +517,83 @@ async function getWeatherForecastForCity(title) {
     throw error;
   }
 
-  const url = new URL(
-    "/v3/wx/forecast/daily/1day",
-    WEATHERCOMPANY_API_BASE
-  );
-  url.searchParams.set("geocode", match.geocode);
-  url.searchParams.set("format", "json");
-  url.searchParams.set("units", WEATHERCOMPANY_UNITS);
-  url.searchParams.set("language", "en-US");
-  url.searchParams.set("apiKey", WEATHERCOMPANY_API_KEY);
+  const buildWeatherUrl = (base) => {
+    const url = new URL("/v3/wx/forecast/daily/1day", base);
+    url.searchParams.set("geocode", match.geocode);
+    url.searchParams.set("format", "json");
+    url.searchParams.set("units", WEATHERCOMPANY_UNITS);
+    url.searchParams.set("language", "en-US");
+    url.searchParams.set("apiKey", WEATHERCOMPANY_API_KEY);
+    return url;
+  };
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      "Accept-Encoding": "gzip",
-      Accept: "application/json",
-      "User-Agent": WEATHERCOMPANY_USER_AGENT,
-    },
-  });
-  const contentType = response.headers.get("content-type") || "";
-  const isJson = contentType.includes("application/json");
-  if (!response.ok || !isJson) {
-    const bodyText = await response.text();
+  const fetchWeather = async (base) => {
+    const url = buildWeatherUrl(base);
+    const response = await fetch(url.toString(), {
+      headers: {
+        "Accept-Encoding": "gzip",
+        Accept: "application/json",
+        "User-Agent": WEATHERCOMPANY_USER_AGENT,
+      },
+    });
+    const contentType = response.headers.get("content-type") || "";
+    const isJson = contentType.includes("application/json");
+    if (!response.ok || !isJson) {
+      const bodyText = await response.text();
+      return {
+        ok: false,
+        details: {
+          status: response.status,
+          contentType,
+          body: bodyText.slice(0, 500),
+          base,
+        },
+      };
+    }
+    try {
+      const data = await response.json();
+      return { ok: true, data };
+    } catch (error) {
+      return {
+        ok: false,
+        details: { contentType, base, message: "invalid json" },
+      };
+    }
+  };
+
+  const primary = await fetchWeather(WEATHERCOMPANY_API_BASE);
+  if (!primary.ok) {
+    const isTWC = WEATHERCOMPANY_API_BASE.includes("twcapi.co");
+    if (isTWC) {
+      const fallback = await fetchWeather("https://api.weather.com");
+      if (fallback.ok) {
+        return {
+          city: match.name,
+          geocode: match.geocode,
+          highTemp: toNumber(
+            Array.isArray(fallback.data?.temperatureMax)
+              ? fallback.data.temperatureMax[0]
+              : fallback.data?.temperatureMax
+          ),
+          lowTemp: toNumber(
+            Array.isArray(fallback.data?.temperatureMin)
+              ? fallback.data.temperatureMin[0]
+              : fallback.data?.temperatureMin
+          ),
+          raw: fallback.data,
+        };
+      }
+      const error = new Error("WeatherCompany request failed");
+      error.details = { primary: primary.details, fallback: fallback.details };
+      throw error;
+    }
+
     const error = new Error("WeatherCompany request failed");
-    error.details = {
-      status: response.status,
-      contentType,
-      body: bodyText.slice(0, 500),
-    };
+    error.details = primary.details;
     throw error;
   }
 
-  let data;
-  try {
-    data = await response.json();
-  } catch (error) {
-    const errorDetails = new Error("WeatherCompany invalid JSON response");
-    errorDetails.details = { contentType };
-    throw errorDetails;
-  }
+  const data = primary.data;
 
   const highTemp = Array.isArray(data?.temperatureMax)
     ? data.temperatureMax[0]
