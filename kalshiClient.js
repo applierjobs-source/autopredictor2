@@ -35,10 +35,7 @@ const CLIMATE_EVENTS_CACHE_TTL_MS = Number(
 );
 const CLIMATE_MAX_SERIES = Number(process.env.CLIMATE_MAX_SERIES || 20);
 
-const climateEventsCache = {
-  value: null,
-  expiresAt: 0,
-};
+const climateEventsCache = new Map();
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -329,8 +326,10 @@ async function getClimateDailyEvents({
   useSandbox,
 } = {}) {
   const now = Date.now();
-  if (climateEventsCache.value && now < climateEventsCache.expiresAt) {
-    return climateEventsCache.value;
+  const cacheKey = useSandbox ? "sandbox" : "prod";
+  const cached = climateEventsCache.get(cacheKey);
+  if (cached && now < cached.expiresAt) {
+    return cached.value;
   }
 
   let series = await getSeriesList({ category: CLIMATE_CATEGORY, useSandbox });
@@ -374,8 +373,10 @@ async function getClimateDailyEvents({
     await sleep(120);
   }
 
-  climateEventsCache.value = events;
-  climateEventsCache.expiresAt = now + CLIMATE_EVENTS_CACHE_TTL_MS;
+  climateEventsCache.set(cacheKey, {
+    value: events,
+    expiresAt: now + CLIMATE_EVENTS_CACHE_TTL_MS,
+  });
   return events;
 }
 

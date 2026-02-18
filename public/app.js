@@ -59,8 +59,16 @@ async function placeClimateTrades() {
     renderStatus({ error: { message: error?.message || "Request failed" } });
   } finally {
     runButton.disabled = false;
-    runButton.textContent = "Run climate trades ($20 each)";
+    updateRunLabel();
   }
+}
+
+function updateRunLabel() {
+  const amountDollars = Number(amountInput.value || 0);
+  const displayAmount = Number.isFinite(amountDollars) && amountDollars > 0
+    ? amountDollars
+    : 0;
+  runButton.textContent = `Run climate trades ($${displayAmount} each)`;
 }
 
 function formatCell(value) {
@@ -116,5 +124,7 @@ async function fetchEvents() {
 
 runButton.addEventListener("click", placeClimateTrades);
 refreshEventsButton.addEventListener("click", fetchEvents);
+amountInput.addEventListener("input", updateRunLabel);
 fetchLastTrade();
 fetchEvents();
+updateRunLabel();
