@@ -50,6 +50,7 @@ event list. It uses the Kalshi Trade API with RSA-PSS authentication.
 - `WEATHERCOMPANY_API_BASE`: Weather Company API base URL (default `https://api.weather.com`).
 - `WEATHERCOMPANY_UNITS`: Weather Company units (default `e`).
 - `WEATHERCOMPANY_USER_AGENT`: User-Agent header for Weather Company requests.
+- `WEATHERCOMPANY_DAILY_DAYS`: Daily forecast days (3-15, default `7`).
 - `OPENAI_API_KEY`: OpenAI API key.
 - `OPENAI_MODEL`: OpenAI model to use (default `gpt-4o-mini`).
 - `KALSHI_MAX_RETRIES`: Retry attempts on 429s (default `3`).

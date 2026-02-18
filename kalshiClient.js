@@ -29,6 +29,9 @@ const WEATHERCOMPANY_API_BASE =
 const WEATHERCOMPANY_UNITS = process.env.WEATHERCOMPANY_UNITS || "e";
 const WEATHERCOMPANY_USER_AGENT =
   process.env.WEATHERCOMPANY_USER_AGENT || "AutoPredictor/1.0";
+const WEATHERCOMPANY_DAILY_DAYS = Number(
+  process.env.WEATHERCOMPANY_DAILY_DAYS || 7
+);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const KALSHI_MAX_RETRIES = Number(process.env.KALSHI_MAX_RETRIES || 3);
@@ -518,7 +521,10 @@ async function getWeatherForecastForCity(title) {
   }
 
   const buildWeatherUrl = (base) => {
-    const url = new URL("/v3/wx/forecast/daily/1day", base);
+    const days = Number.isFinite(WEATHERCOMPANY_DAILY_DAYS)
+      ? Math.max(3, Math.min(15, WEATHERCOMPANY_DAILY_DAYS))
+      : 7;
+    const url = new URL(`/v3/wx/forecast/daily/${days}day`, base);
     url.searchParams.set("geocode", match.geocode);
     url.searchParams.set("format", "json");
     url.searchParams.set("units", WEATHERCOMPANY_UNITS);
