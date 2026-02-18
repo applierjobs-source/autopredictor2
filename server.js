@@ -6,6 +6,8 @@ const {
   placeKalshiTrade,
   placeHighestOddsTrade,
   getMarketsExpiringToday,
+  getClimateDailyEvents,
+  placeClimateDailyTrades,
 } = require("./kalshiClient");
 
 const app = express();
@@ -14,7 +16,7 @@ const port = process.env.PORT || 3000;
 const scheduledEnabled = process.env.SCHEDULED_TRADES_ENABLED !== "false";
 const tradeAmountCents = Number(process.env.TRADE_AMOUNT_CENTS || 1000);
 const autoStrategy =
-  process.env.KALSHI_AUTO_STRATEGY || "highest-odds";
+  process.env.KALSHI_AUTO_STRATEGY || "climate-daily";
 
 let lastTrade = null;
 let lastTradeError = null;
@@ -48,6 +50,28 @@ app.get("/api/bets/expiring-today", async (req, res) => {
   } catch (error) {
     const errorPayload = {
       message: error?.message || "Failed to load markets",
+      details: error?.details || null,
+    };
+    res.status(500).json({ error: errorPayload });
+  }
+});
+
+app.get("/api/climate/events", async (req, res) => {
+  try {
+    const events = await getClimateDailyEvents();
+    const payload = events.map((event) => ({
+      eventTicker: event.event_ticker,
+      title: event.title,
+      closeTime: event.close_time,
+      markets: (event.markets || []).map((market) => ({
+        ticker: market.ticker,
+        label: market.yes_sub_title || market.title || market.ticker,
+      })),
+    }));
+    res.json({ events: payload });
+  } catch (error) {
+    const errorPayload = {
+      message: error?.message || "Failed to load climate events",
       details: error?.details || null,
     };
     res.status(500).json({ error: errorPayload });
@@ -100,6 +124,21 @@ app.post("/api/trade/highest-odds", async (req, res) => {
   }
 });
 
+app.post("/api/trade/climate-daily", async (req, res) => {
+  try {
+    const trades = await placeClimateDailyTrades();
+    lastTrade = trades;
+    lastTradeError = null;
+    res.json({ trades });
+  } catch (error) {
+    lastTradeError = {
+      message: error?.message || "Climate daily trade failed",
+      details: error?.details || null,
+    };
+    res.status(500).json({ error: lastTradeError });
+  }
+});
+
 if (scheduledEnabled) {
   cron.schedule(
     "0 9 * * *",
@@ -108,7 +147,9 @@ if (scheduledEnabled) {
         const trade =
           autoStrategy === "fixed-ticker"
             ? await placeKalshiTrade({ amountCents: tradeAmountCents })
-            : await placeHighestOddsTrade({ amountCents: tradeAmountCents });
+            : autoStrategy === "highest-odds"
+            ? await placeHighestOddsTrade({ amountCents: tradeAmountCents })
+            : await placeClimateDailyTrades();
         lastTrade = trade;
         lastTradeError = null;
         console.log("[scheduler] Placed trade", trade);

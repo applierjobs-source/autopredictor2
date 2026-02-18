@@ -1,9 +1,8 @@
 const statusEl = document.getElementById("status");
-const buyButton = document.getElementById("buyButton");
-const bestButton = document.getElementById("bestButton");
-const refreshBetsButton = document.getElementById("refreshBets");
-const betsStatusEl = document.getElementById("betsStatus");
-const betsBodyEl = document.getElementById("betsBody");
+const runButton = document.getElementById("runButton");
+const refreshEventsButton = document.getElementById("refreshEvents");
+const eventsStatusEl = document.getElementById("eventsStatus");
+const eventsBodyEl = document.getElementById("eventsBody");
 
 function renderStatus(payload) {
   if (!payload) {
@@ -20,9 +19,10 @@ function renderStatus(payload) {
     return;
   }
 
-  if (payload.trade) {
-    statusEl.textContent = `Trade placed:\n${JSON.stringify(
-      payload.trade,
+  if (payload.trade || payload.trades) {
+    const label = payload.trades ? "Trades placed" : "Trade placed";
+    statusEl.textContent = `${label}:\n${JSON.stringify(
+      payload.trades || payload.trade,
       null,
       2
     )}`;
@@ -35,15 +35,14 @@ async function fetchLastTrade() {
   renderStatus(data);
 }
 
-async function placeTrade() {
-  buyButton.disabled = true;
-  buyButton.textContent = "Placing trade...";
+async function placeClimateTrades() {
+  runButton.disabled = true;
+  runButton.textContent = "Placing trades...";
 
   try {
-    const response = await fetch("/api/trade", {
+    const response = await fetch("/api/trade/climate-daily", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amountCents: 1000 }),
     });
 
     const data = await response.json();
@@ -51,29 +50,8 @@ async function placeTrade() {
   } catch (error) {
     renderStatus({ error: { message: error?.message || "Request failed" } });
   } finally {
-    buyButton.disabled = false;
-    buyButton.textContent = "Buy $10 (default)";
-  }
-}
-
-async function placeBestTrade() {
-  bestButton.disabled = true;
-  bestButton.textContent = "Placing trade...";
-
-  try {
-    const response = await fetch("/api/trade/highest-odds", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amountCents: 1000 }),
-    });
-
-    const data = await response.json();
-    renderStatus(data);
-  } catch (error) {
-    renderStatus({ error: { message: error?.message || "Request failed" } });
-  } finally {
-    bestButton.disabled = false;
-    bestButton.textContent = "Buy $10 (highest odds)";
+    runButton.disabled = false;
+    runButton.textContent = "Run climate trades ($20 each)";
   }
 }
 
@@ -82,75 +60,50 @@ function formatCell(value) {
   return value;
 }
 
-function renderBets(markets) {
-  betsBodyEl.innerHTML = "";
-  if (!markets.length) {
-    betsStatusEl.textContent = "No markets expiring today.";
+function renderEvents(events) {
+  eventsBodyEl.innerHTML = "";
+  if (!events.length) {
+    eventsStatusEl.textContent = "No climate events found.";
     return;
   }
 
-  betsStatusEl.textContent = `${markets.length} markets expiring today.`;
+  eventsStatusEl.textContent = `${events.length} climate events loaded.`;
 
-  markets.forEach((market) => {
+  events.forEach((event) => {
     const row = document.createElement("tr");
-    const tradeCell = document.createElement("td");
-    const tradeButton = document.createElement("button");
-    tradeButton.className = "secondary";
-    tradeButton.textContent = "Trade $10";
-    tradeButton.addEventListener("click", () => placeTradeForTicker(market));
-    tradeCell.appendChild(tradeButton);
+    const marketLabels = (event.markets || [])
+      .map((market) => market.label)
+      .filter(Boolean)
+      .join(", ");
 
     row.innerHTML = `
-      <td></td>
-      <td>${formatCell(market.ticker)}</td>
-      <td>${formatCell(market.title)}</td>
-      <td>${formatCell(market.closeTime)}</td>
-      <td>${formatCell(market.yesAskDollars)}</td>
-      <td>${formatCell(market.yesBidDollars)}</td>
-      <td>${formatCell(market.lastPriceDollars)}</td>
+      <td>${formatCell(event.eventTicker)}</td>
+      <td>${formatCell(event.closeTime)}</td>
+      <td>${formatCell(event.title)}</td>
+      <td>${formatCell(marketLabels)}</td>
     `;
-    row.children[0].replaceWith(tradeCell);
-    betsBodyEl.appendChild(row);
+    eventsBodyEl.appendChild(row);
   });
 }
 
-async function fetchBets() {
-  betsStatusEl.textContent = "Loading markets...";
-  betsBodyEl.innerHTML = "";
+async function fetchEvents() {
+  eventsStatusEl.textContent = "Loading events...";
+  eventsBodyEl.innerHTML = "";
 
   try {
-    const response = await fetch("/api/bets/expiring-today");
+    const response = await fetch("/api/climate/events");
     const data = await response.json();
     if (data.error) {
-      betsStatusEl.textContent = data.error.message || "Failed to load markets.";
+      eventsStatusEl.textContent = data.error.message || "Failed to load events.";
       return;
     }
-    renderBets(data.markets || []);
+    renderEvents(data.events || []);
   } catch (error) {
-    betsStatusEl.textContent = error?.message || "Failed to load markets.";
+    eventsStatusEl.textContent = error?.message || "Failed to load events.";
   }
 }
 
-async function placeTradeForTicker(market) {
-  if (!market?.ticker) return;
-  betsStatusEl.textContent = `Placing trade for ${market.ticker}...`;
-
-  try {
-    const response = await fetch("/api/trade", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amountCents: 1000, ticker: market.ticker }),
-    });
-    const data = await response.json();
-    renderStatus(data);
-    betsStatusEl.textContent = `Placed trade for ${market.ticker}.`;
-  } catch (error) {
-    betsStatusEl.textContent = error?.message || "Trade failed.";
-  }
-}
-
-buyButton.addEventListener("click", placeTrade);
-bestButton.addEventListener("click", placeBestTrade);
-refreshBetsButton.addEventListener("click", fetchBets);
+runButton.addEventListener("click", placeClimateTrades);
+refreshEventsButton.addEventListener("click", fetchEvents);
 fetchLastTrade();
-fetchBets();
+fetchEvents();

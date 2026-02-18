@@ -1,9 +1,9 @@
 # AutoPredictor - Kalshi Trade Bot
 
-This project places one $10 trade every day at 9:00 AM CST using the market
-expiring today with the highest YES odds. It also provides a frontend with
-buttons to place manual trades and a list of expiring markets. It uses the
-Kalshi Trade API with RSA-PSS authentication.
+This project places $20 trades across daily climate events using live Weather
+Company forecasts and an OpenAI decision to pick the best temperature range.
+It includes a frontend to trigger the batch trade and see the daily climate
+event list. It uses the Kalshi Trade API with RSA-PSS authentication.
 
 ## Setup
 
@@ -37,9 +37,17 @@ Kalshi Trade API with RSA-PSS authentication.
 - `KALSHI_MARKET_STATUS`: Market status filter for lists (default `open`).
 - `KALSHI_MARKET_PAGE_LIMIT`: Page size for market lists (default `500`).
 - `KALSHI_MARKET_TIMEZONE`: Timezone for "expiring today" filters (default `America/Chicago`).
-- `KALSHI_AUTO_STRATEGY`: `highest-odds` (default) or `fixed-ticker`.
+- `KALSHI_AUTO_STRATEGY`: `climate-daily` (default), `highest-odds`, or `fixed-ticker`.
+- `KALSHI_CLIMATE_CATEGORY`: Kalshi category for climate series (default `climate`).
+- `KALSHI_CLIMATE_FREQUENCY`: Kalshi series frequency filter (default `daily`).
 - `TRADE_AMOUNT_CENTS`: Trade size in cents (default `1000`).
+- `CLIMATE_TRADE_AMOUNT_CENTS`: Trade size per climate event (default `2000`).
 - `SCHEDULED_TRADES_ENABLED`: Set to `false` to disable 9am CST scheduling.
+- `WEATHERCOMPANY_API_KEY`: Weather Company API key.
+- `WEATHERCOMPANY_API_BASE`: Weather Company API base URL (default `https://api.weather.com`).
+- `WEATHERCOMPANY_UNITS`: Weather Company units (default `e`).
+- `OPENAI_API_KEY`: OpenAI API key.
+- `OPENAI_MODEL`: OpenAI model to use (default `gpt-4o-mini`).
 
 ## Railway Notes
 
