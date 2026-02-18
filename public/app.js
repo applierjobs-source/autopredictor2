@@ -3,6 +3,8 @@ const runButton = document.getElementById("runButton");
 const refreshEventsButton = document.getElementById("refreshEvents");
 const eventsStatusEl = document.getElementById("eventsStatus");
 const eventsBodyEl = document.getElementById("eventsBody");
+const amountInput = document.getElementById("amountInput");
+const sandboxToggle = document.getElementById("sandboxToggle");
 
 function renderStatus(payload) {
   if (!payload) {
@@ -38,11 +40,17 @@ async function fetchLastTrade() {
 async function placeClimateTrades() {
   runButton.disabled = true;
   runButton.textContent = "Placing trades...";
+  const amountDollars = Number(amountInput.value || 0);
+  const amountCents = Number.isFinite(amountDollars)
+    ? Math.max(1, Math.round(amountDollars * 100))
+    : undefined;
+  const sandbox = Boolean(sandboxToggle.checked);
 
   try {
     const response = await fetch("/api/trade/climate-daily", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amountCents, sandbox }),
     });
 
     const data = await response.json();
@@ -89,9 +97,12 @@ function renderEvents(events) {
 async function fetchEvents() {
   eventsStatusEl.textContent = "Loading events...";
   eventsBodyEl.innerHTML = "";
+  const sandbox = Boolean(sandboxToggle.checked);
 
   try {
-    const response = await fetch("/api/climate/events");
+    const response = await fetch(
+      `/api/climate/events?sandbox=${sandbox ? "true" : "false"}`
+    );
     const data = await response.json();
     if (data.error) {
       eventsStatusEl.textContent = data.error.message || "Failed to load events.";

@@ -44,11 +44,17 @@ event list. It uses the Kalshi Trade API with RSA-PSS authentication.
 - `TRADE_AMOUNT_CENTS`: Trade size in cents (default `1000`).
 - `CLIMATE_TRADE_AMOUNT_CENTS`: Trade size per climate event (default `2000`).
 - `SCHEDULED_TRADES_ENABLED`: Set to `false` to disable 9am CST scheduling.
+- `KALSHI_USE_SANDBOX`: Use sandbox by default for scheduled trades (default `false`).
+- `KALSHI_SANDBOX_API_BASE`: Base URL for Kalshi sandbox API.
 - `WEATHERCOMPANY_API_KEY`: Weather Company API key.
 - `WEATHERCOMPANY_API_BASE`: Weather Company API base URL (default `https://api.weather.com`).
 - `WEATHERCOMPANY_UNITS`: Weather Company units (default `e`).
 - `OPENAI_API_KEY`: OpenAI API key.
 - `OPENAI_MODEL`: OpenAI model to use (default `gpt-4o-mini`).
+- `KALSHI_MAX_RETRIES`: Retry attempts on 429s (default `3`).
+- `KALSHI_RETRY_BASE_DELAY_MS`: Base delay for 429 retries (default `800`).
+- `CLIMATE_EVENTS_CACHE_TTL_MS`: Cache TTL for events (default `300000`).
+- `CLIMATE_MAX_SERIES`: Max series to scan per run (default `20`).
 
 ## Railway Notes
 

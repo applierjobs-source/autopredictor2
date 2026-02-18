@@ -17,6 +17,13 @@ const scheduledEnabled = process.env.SCHEDULED_TRADES_ENABLED !== "false";
 const tradeAmountCents = Number(process.env.TRADE_AMOUNT_CENTS || 1000);
 const autoStrategy =
   process.env.KALSHI_AUTO_STRATEGY || "climate-daily";
+const sandboxByDefault = process.env.KALSHI_USE_SANDBOX === "true";
+
+function parseBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return false;
+  return ["true", "1", "yes", "on"].includes(value.toLowerCase());
+}
 
 let lastTrade = null;
 let lastTradeError = null;
@@ -58,7 +65,8 @@ app.get("/api/bets/expiring-today", async (req, res) => {
 
 app.get("/api/climate/events", async (req, res) => {
   try {
-    const events = await getClimateDailyEvents();
+    const useSandbox = parseBoolean(req.query?.sandbox) || sandboxByDefault;
+    const events = await getClimateDailyEvents({ useSandbox });
     const payload = events.map((event) => ({
       eventTicker: event.event_ticker,
       title: event.title,
@@ -109,9 +117,10 @@ app.post("/api/trade", async (req, res) => {
 
 app.post("/api/trade/highest-odds", async (req, res) => {
   const amountCents = Number(req.body?.amountCents || tradeAmountCents);
+  const useSandbox = parseBoolean(req.body?.sandbox) || sandboxByDefault;
 
   try {
-    const trade = await placeHighestOddsTrade({ amountCents });
+    const trade = await placeHighestOddsTrade({ amountCents, useSandbox });
     lastTrade = trade;
     lastTradeError = null;
     res.json({ trade });
@@ -126,7 +135,9 @@ app.post("/api/trade/highest-odds", async (req, res) => {
 
 app.post("/api/trade/climate-daily", async (req, res) => {
   try {
-    const trades = await placeClimateDailyTrades();
+    const amountCents = Number(req.body?.amountCents || 0) || undefined;
+    const useSandbox = parseBoolean(req.body?.sandbox) || sandboxByDefault;
+    const trades = await placeClimateDailyTrades({ amountCents, useSandbox });
     lastTrade = trades;
     lastTradeError = null;
     res.json({ trades });
@@ -146,10 +157,18 @@ if (scheduledEnabled) {
       try {
         const trade =
           autoStrategy === "fixed-ticker"
-            ? await placeKalshiTrade({ amountCents: tradeAmountCents })
+            ? await placeKalshiTrade({
+                amountCents: tradeAmountCents,
+                useSandbox: sandboxByDefault,
+              })
             : autoStrategy === "highest-odds"
-            ? await placeHighestOddsTrade({ amountCents: tradeAmountCents })
-            : await placeClimateDailyTrades();
+            ? await placeHighestOddsTrade({
+                amountCents: tradeAmountCents,
+                useSandbox: sandboxByDefault,
+              })
+            : await placeClimateDailyTrades({
+                useSandbox: sandboxByDefault,
+              });
         lastTrade = trade;
         lastTradeError = null;
         console.log("[scheduler] Placed trade", trade);

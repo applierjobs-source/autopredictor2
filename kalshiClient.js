@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 
 const API_BASE = process.env.KALSHI_API_BASE || "https://api.kalshi.com";
+const SANDBOX_API_BASE = process.env.KALSHI_SANDBOX_API_BASE;
 const ACCESS_KEY = process.env.KALSHI_ACCESS_KEY;
 const PRIVATE_KEY_RAW = process.env.KALSHI_PRIVATE_KEY;
 const MARKET_TICKER = process.env.KALSHI_MARKET_TICKER;
@@ -25,6 +26,23 @@ const WEATHERCOMPANY_API_BASE =
 const WEATHERCOMPANY_UNITS = process.env.WEATHERCOMPANY_UNITS || "e";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const KALSHI_MAX_RETRIES = Number(process.env.KALSHI_MAX_RETRIES || 3);
+const KALSHI_RETRY_BASE_DELAY_MS = Number(
+  process.env.KALSHI_RETRY_BASE_DELAY_MS || 800
+);
+const CLIMATE_EVENTS_CACHE_TTL_MS = Number(
+  process.env.CLIMATE_EVENTS_CACHE_TTL_MS || 300000
+);
+const CLIMATE_MAX_SERIES = Number(process.env.CLIMATE_MAX_SERIES || 20);
+
+const climateEventsCache = {
+  value: null,
+  expiresAt: 0,
+};
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function getPrivateKey() {
   if (!PRIVATE_KEY_RAW) return null;
@@ -69,11 +87,20 @@ function formatDateInTimeZone(date, timeZone) {
   }).format(date);
 }
 
-async function kalshiRequest({ method, path, body }) {
+function resolveApiBase(useSandbox) {
+  if (!useSandbox) return API_BASE;
+  if (!SANDBOX_API_BASE) {
+    throw new Error("Missing KALSHI_SANDBOX_API_BASE");
+  }
+  return SANDBOX_API_BASE;
+}
+
+async function kalshiRequest({ method, path, body, useSandbox }, attempt = 0) {
   requireAccessKey();
   const timestamp = Date.now().toString();
   const signature = createSignature({ timestamp, method, path });
-  const url = `${API_BASE}${path}`;
+  const apiBase = resolveApiBase(useSandbox);
+  const url = `${apiBase}${path}`;
 
   const response = await fetch(url, {
     method,
@@ -85,6 +112,15 @@ async function kalshiRequest({ method, path, body }) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+
+  if (response.status === 429 && attempt < KALSHI_MAX_RETRIES) {
+    const retryAfter = Number(response.headers.get("retry-after")) || 0;
+    const delay =
+      (retryAfter ? retryAfter * 1000 : KALSHI_RETRY_BASE_DELAY_MS) *
+      Math.max(1, attempt + 1);
+    await sleep(delay);
+    return kalshiRequest({ method, path, body }, attempt + 1);
+  }
 
   if (!response.ok) {
     let errorDetails = null;
@@ -200,7 +236,7 @@ function selectForecastValue(eventTitle, forecast) {
   return forecast?.highTemp;
 }
 
-async function getMarketsPage({ cursor }) {
+async function getMarketsPage({ cursor, useSandbox }) {
   const params = new URLSearchParams();
   params.set("status", MARKET_STATUS);
   params.set("limit", String(MARKET_PAGE_LIMIT));
@@ -208,16 +244,16 @@ async function getMarketsPage({ cursor }) {
   if (cursor) params.set("cursor", cursor);
 
   const path = `/trade-api/v2/markets?${params.toString()}`;
-  return kalshiRequest({ method: "GET", path });
+  return kalshiRequest({ method: "GET", path, useSandbox });
 }
 
-async function getMarkets() {
+async function getMarkets({ useSandbox } = {}) {
   const markets = [];
   let cursor = null;
   let pageCount = 0;
 
   while (pageCount < 10) {
-    const data = await getMarketsPage({ cursor });
+    const data = await getMarketsPage({ cursor, useSandbox });
     if (Array.isArray(data?.markets)) {
       markets.push(...data.markets);
     }
@@ -230,9 +266,12 @@ async function getMarkets() {
   return markets;
 }
 
-async function getMarketsExpiringToday({ timeZone = MARKET_TIMEZONE } = {}) {
+async function getMarketsExpiringToday({
+  timeZone = MARKET_TIMEZONE,
+  useSandbox,
+} = {}) {
   const todayKey = formatDateInTimeZone(new Date(), timeZone);
-  const markets = await getMarkets();
+  const markets = await getMarkets({ useSandbox });
 
   return markets.filter((market) => {
     const closeAt = market?.close_time || market?.latest_expiration_time;
@@ -242,15 +281,20 @@ async function getMarketsExpiringToday({ timeZone = MARKET_TIMEZONE } = {}) {
   });
 }
 
-async function getSeriesList({ category } = {}) {
+async function getSeriesList({ category, useSandbox } = {}) {
   const params = new URLSearchParams();
   if (category) params.set("category", category);
   const path = `/trade-api/v2/series?${params.toString()}`;
-  const data = await kalshiRequest({ method: "GET", path });
+  const data = await kalshiRequest({ method: "GET", path, useSandbox });
   return Array.isArray(data?.series) ? data.series : [];
 }
 
-async function getEventsPage({ seriesTicker, cursor, limit = 200 }) {
+async function getEventsPage({
+  seriesTicker,
+  cursor,
+  limit = 200,
+  useSandbox,
+}) {
   const params = new URLSearchParams();
   params.set("limit", String(limit));
   params.set("with_nested_markets", "true");
@@ -259,16 +303,16 @@ async function getEventsPage({ seriesTicker, cursor, limit = 200 }) {
   if (cursor) params.set("cursor", cursor);
 
   const path = `/trade-api/v2/events?${params.toString()}`;
-  return kalshiRequest({ method: "GET", path });
+  return kalshiRequest({ method: "GET", path, useSandbox });
 }
 
-async function getEventsForSeries(seriesTicker) {
+async function getEventsForSeries(seriesTicker, { useSandbox } = {}) {
   const events = [];
   let cursor = null;
   let pageCount = 0;
 
   while (pageCount < 10) {
-    const data = await getEventsPage({ seriesTicker, cursor });
+    const data = await getEventsPage({ seriesTicker, cursor, useSandbox });
     if (Array.isArray(data?.events)) {
       events.push(...data.events);
     }
@@ -280,10 +324,18 @@ async function getEventsForSeries(seriesTicker) {
   return events;
 }
 
-async function getClimateDailyEvents({ timeZone = MARKET_TIMEZONE } = {}) {
-  let series = await getSeriesList({ category: CLIMATE_CATEGORY });
+async function getClimateDailyEvents({
+  timeZone = MARKET_TIMEZONE,
+  useSandbox,
+} = {}) {
+  const now = Date.now();
+  if (climateEventsCache.value && now < climateEventsCache.expiresAt) {
+    return climateEventsCache.value;
+  }
+
+  let series = await getSeriesList({ category: CLIMATE_CATEGORY, useSandbox });
   if (!series.length) {
-    series = await getSeriesList({});
+    series = await getSeriesList({ useSandbox });
   }
 
   const dailySeries = series.filter((item) => {
@@ -308,8 +360,10 @@ async function getClimateDailyEvents({ timeZone = MARKET_TIMEZONE } = {}) {
   const todayKey = formatDateInTimeZone(new Date(), timeZone);
   const events = [];
 
-  for (const entry of dailySeries) {
-    const seriesEvents = await getEventsForSeries(entry.ticker);
+  const limitedSeries = dailySeries.slice(0, Math.max(1, CLIMATE_MAX_SERIES));
+
+  for (const entry of limitedSeries) {
+    const seriesEvents = await getEventsForSeries(entry.ticker, { useSandbox });
     seriesEvents.forEach((event) => {
       const closeAt = event?.close_time;
       if (!closeAt) return;
@@ -317,8 +371,11 @@ async function getClimateDailyEvents({ timeZone = MARKET_TIMEZONE } = {}) {
       if (closeKey !== todayKey) return;
       events.push(event);
     });
+    await sleep(120);
   }
 
+  climateEventsCache.value = events;
+  climateEventsCache.expiresAt = now + CLIMATE_EVENTS_CACHE_TTL_MS;
   return events;
 }
 
@@ -460,19 +517,20 @@ async function decideClimateMarketForEvent(event) {
   return { chosen, forecast, aiTicker };
 }
 
-async function placeClimateDailyTrades() {
-  const events = await getClimateDailyEvents();
+async function placeClimateDailyTrades({ amountCents, useSandbox } = {}) {
+  const events = await getClimateDailyEvents({ useSandbox });
   const trades = [];
 
   for (const event of events) {
     try {
       const decision = await decideClimateMarketForEvent(event);
       const trade = await placeKalshiTrade({
-        amountCents: CLIMATE_TRADE_AMOUNT_CENTS,
+        amountCents: amountCents || CLIMATE_TRADE_AMOUNT_CENTS,
         ticker: decision.chosen.ticker,
         side: "yes",
         action: "buy",
         type: "market",
+        useSandbox,
       });
       trades.push({
         eventTicker: event.event_ticker,
@@ -513,6 +571,7 @@ async function placeKalshiTrade({
   count,
   price,
   contractPriceCents,
+  useSandbox,
 } = {}) {
   if (!ticker && !MARKET_TICKER) {
     throw new Error("Missing KALSHI_MARKET_TICKER");
@@ -542,7 +601,7 @@ async function placeKalshiTrade({
     }
   }
 
-  const data = await kalshiRequest({ method: "POST", path, body });
+  const data = await kalshiRequest({ method: "POST", path, body, useSandbox });
 
   return {
     amountCents: resolvedAmountCents,
@@ -556,8 +615,8 @@ async function placeKalshiTrade({
   };
 }
 
-async function placeHighestOddsTrade({ amountCents } = {}) {
-  const markets = await getMarketsExpiringToday();
+async function placeHighestOddsTrade({ amountCents, useSandbox } = {}) {
+  const markets = await getMarketsExpiringToday({ useSandbox });
   if (!markets.length) {
     const error = new Error("No markets expiring today");
     error.details = { reason: "empty_list" };
@@ -587,6 +646,7 @@ async function placeHighestOddsTrade({ amountCents } = {}) {
     action: "buy",
     type: "market",
     contractPriceCents: priceCents,
+    useSandbox,
   });
 
   return {

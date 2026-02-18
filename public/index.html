@@ -47,6 +47,19 @@
       .muted {
         color: #666;
       }
+      label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-right: 12px;
+      }
+      input[type="number"] {
+        width: 90px;
+        padding: 6px 8px;
+      }
+      .toggle {
+        font-size: 14px;
+      }
     </style>
   </head>
   <body>
@@ -57,7 +70,15 @@
         OpenAI decision.
       </p>
       <div>
-        <button id="runButton">Run climate trades ($20 each)</button>
+        <label>
+          Amount per event ($)
+          <input id="amountInput" type="number" min="1" step="1" value="20" />
+        </label>
+        <label class="toggle">
+          <input id="sandboxToggle" type="checkbox" />
+          Use Kalshi sandbox
+        </label>
+        <button id="runButton">Run climate trades</button>
       </div>
       <div class="status" id="status">Waiting for trade...</div>
 
