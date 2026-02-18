@@ -27,6 +27,8 @@ const WEATHERCOMPANY_API_KEY = process.env.WEATHERCOMPANY_API_KEY;
 const WEATHERCOMPANY_API_BASE =
   process.env.WEATHERCOMPANY_API_BASE || "https://api.weather.com";
 const WEATHERCOMPANY_UNITS = process.env.WEATHERCOMPANY_UNITS || "e";
+const WEATHERCOMPANY_USER_AGENT =
+  process.env.WEATHERCOMPANY_USER_AGENT || "AutoPredictor/1.0";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const KALSHI_MAX_RETRIES = Number(process.env.KALSHI_MAX_RETRIES || 3);
@@ -167,6 +169,11 @@ const CITY_GEOCODES = [
   { name: "Phoenix", aliases: ["phoenix"], geocode: "33.4484,-112.0740" },
   { name: "Denver", aliases: ["denver"], geocode: "39.7392,-104.9903" },
   { name: "Austin", aliases: ["austin"], geocode: "30.2672,-97.7431" },
+  {
+    name: "San Antonio",
+    aliases: ["san antonio"],
+    geocode: "29.4241,-98.4936",
+  },
   { name: "Philadelphia", aliases: ["philadelphia"], geocode: "39.9526,-75.1652" },
   { name: "Seattle", aliases: ["seattle"], geocode: "47.6062,-122.3321" },
   { name: "San Francisco", aliases: ["san francisco", "sf"], geocode: "37.7749,-122.4194" },
@@ -516,14 +523,33 @@ async function getWeatherForecastForCity(title) {
   url.searchParams.set("apiKey", WEATHERCOMPANY_API_KEY);
 
   const response = await fetch(url.toString(), {
-    headers: { "Accept-Encoding": "gzip" },
+    headers: {
+      "Accept-Encoding": "gzip",
+      Accept: "application/json",
+      "User-Agent": WEATHERCOMPANY_USER_AGENT,
+    },
   });
-  if (!response.ok) {
+  const contentType = response.headers.get("content-type") || "";
+  const isJson = contentType.includes("application/json");
+  if (!response.ok || !isJson) {
+    const bodyText = await response.text();
     const error = new Error("WeatherCompany request failed");
-    error.details = await response.text();
+    error.details = {
+      status: response.status,
+      contentType,
+      body: bodyText.slice(0, 500),
+    };
     throw error;
   }
-  const data = await response.json();
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    const errorDetails = new Error("WeatherCompany invalid JSON response");
+    errorDetails.details = { contentType };
+    throw errorDetails;
+  }
 
   const highTemp = Array.isArray(data?.temperatureMax)
     ? data.temperatureMax[0]
