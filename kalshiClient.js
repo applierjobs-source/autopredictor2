@@ -119,7 +119,7 @@ async function kalshiRequest({ method, path, body, useSandbox }, attempt = 0) {
       (retryAfter ? retryAfter * 1000 : KALSHI_RETRY_BASE_DELAY_MS) *
       Math.max(1, attempt + 1);
     await sleep(delay);
-    return kalshiRequest({ method, path, body }, attempt + 1);
+    return kalshiRequest({ method, path, body, useSandbox }, attempt + 1);
   }
 
   if (!response.ok) {
@@ -128,6 +128,16 @@ async function kalshiRequest({ method, path, body, useSandbox }, attempt = 0) {
       errorDetails = await response.json();
     } catch (err) {
       errorDetails = await response.text();
+    }
+
+    const errorCode = errorDetails?.error?.code;
+    if (
+      attempt < KALSHI_MAX_RETRIES &&
+      (response.status >= 500 || errorCode === "service_unavailable")
+    ) {
+      const delay = KALSHI_RETRY_BASE_DELAY_MS * Math.max(1, attempt + 1);
+      await sleep(delay);
+      return kalshiRequest({ method, path, body, useSandbox }, attempt + 1);
     }
 
     const error = new Error("Kalshi request failed");
