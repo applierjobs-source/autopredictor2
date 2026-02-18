@@ -14,9 +14,12 @@ const CONTRACT_PRICE_CENTS = Number(
 const MARKET_STATUS = process.env.KALSHI_MARKET_STATUS || "open";
 const MARKET_PAGE_LIMIT = Number(process.env.KALSHI_MARKET_PAGE_LIMIT || 500);
 const MARKET_TIMEZONE = process.env.KALSHI_MARKET_TIMEZONE || "America/Chicago";
-const CLIMATE_CATEGORY = process.env.KALSHI_CLIMATE_CATEGORY || "climate";
+const CLIMATE_CATEGORY =
+  process.env.KALSHI_CLIMATE_CATEGORY || "Climate and Weather";
 const CLIMATE_FREQUENCY = process.env.KALSHI_CLIMATE_FREQUENCY || "daily";
-const CLIMATE_TAG = process.env.KALSHI_CLIMATE_TAG || "climate";
+const CLIMATE_TAGS_RAW =
+  process.env.KALSHI_CLIMATE_TAGS ||
+  "Daily temperature,High temp,Low temp,Snow and rain";
 const CLIMATE_TRADE_AMOUNT_CENTS = Number(
   process.env.CLIMATE_TRADE_AMOUNT_CENTS || 2000
 );
@@ -173,6 +176,13 @@ function normalizeText(value) {
     .replace(/[^\w\s.]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function parseCsv(value) {
+  return String(value || "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function findCityFromTitle(title) {
@@ -337,21 +347,32 @@ async function getClimateDailyEvents({
     series = await getSeriesList({ useSandbox });
   }
 
+  const climateTags = parseCsv(CLIMATE_TAGS_RAW).map(normalizeText);
+  const categoryCandidates = parseCsv(CLIMATE_CATEGORY).map(normalizeText);
+
   const dailySeries = series.filter((item) => {
     const frequencyMatches = normalizeText(item?.frequency).includes(
       CLIMATE_FREQUENCY
     );
     if (!frequencyMatches) return false;
 
-    const categoryMatches = normalizeText(item?.category).includes(
-      normalizeText(CLIMATE_CATEGORY)
+    const categoryValue = normalizeText(item?.category);
+    const categoryMatches = categoryCandidates.some((candidate) =>
+      candidate ? categoryValue.includes(candidate) : false
     );
     const tagMatches = Array.isArray(item?.tags)
       ? item.tags.some((tag) =>
-          normalizeText(tag).includes(normalizeText(CLIMATE_TAG))
+          climateTags.some((candidate) =>
+            candidate ? normalizeText(tag).includes(candidate) : false
+          )
         )
       : false;
-    const titleMatches = normalizeText(item?.title).includes("climate");
+    const titleValue = normalizeText(item?.title);
+    const titleMatches =
+      titleValue.includes("climate") ||
+      titleValue.includes("temperature") ||
+      titleValue.includes("rain") ||
+      titleValue.includes("snow");
 
     return categoryMatches || tagMatches || titleMatches;
   });
