@@ -62,6 +62,7 @@ event list. It uses the Kalshi Trade API with RSA-PSS authentication.
 - `TWC_STD_DEFAULT`: Default std dev for TWC (F).
 - `NOAA_WEIGHT`: Weight for NOAA probability in mixture.
 - `TWC_WEIGHT`: Weight for TWC probability in mixture.
+- `KALSHI_WEIGHT`: Weight for Kalshi implied probability in mixture.
 - `KALSHI_EDGE_THRESHOLD`: Minimum edge required (default `0.03`).
 - `KALSHI_FEE_BUFFER`: Fee buffer subtracted from edge (default `0.01`).
 - `KALSHI_MAX_DIVERGENCE_F`: Skip trades when NOAA/TWC differ by more than this (F).

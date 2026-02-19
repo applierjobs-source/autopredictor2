@@ -46,6 +46,7 @@ const NOAA_STD_DEFAULT = Number(process.env.NOAA_STD_DEFAULT || 4);
 const TWC_STD_DEFAULT = Number(process.env.TWC_STD_DEFAULT || 4);
 const NOAA_WEIGHT = Number(process.env.NOAA_WEIGHT || 0.5);
 const TWC_WEIGHT = Number(process.env.TWC_WEIGHT || 0.5);
+const KALSHI_WEIGHT = Number(process.env.KALSHI_WEIGHT || 0.1);
 const EDGE_THRESHOLD = Number(process.env.KALSHI_EDGE_THRESHOLD || 0.03);
 const FEE_BUFFER = Number(process.env.KALSHI_FEE_BUFFER || 0.01);
 const MAX_DIVERGENCE_F = Number(process.env.KALSHI_MAX_DIVERGENCE_F || 10);
@@ -1028,9 +1029,10 @@ async function decideClimateMarketForEvent(event) {
     lowTemp: noaa.forecastHigh,
   });
 
-  const weightSum = NOAA_WEIGHT + TWC_WEIGHT;
-  const noaaWeight = weightSum > 0 ? NOAA_WEIGHT / weightSum : 0.5;
-  const twcWeight = weightSum > 0 ? TWC_WEIGHT / weightSum : 0.5;
+  const weightSum = NOAA_WEIGHT + TWC_WEIGHT + KALSHI_WEIGHT;
+  const noaaWeight = weightSum > 0 ? NOAA_WEIGHT / weightSum : 0.45;
+  const twcWeight = weightSum > 0 ? TWC_WEIGHT / weightSum : 0.45;
+  const kalshiWeight = weightSum > 0 ? KALSHI_WEIGHT / weightSum : 0.1;
 
   let bestEdge = -Infinity;
   let bestMeta = null;
@@ -1045,7 +1047,8 @@ async function decideClimateMarketForEvent(event) {
       if (noaaProb === null && twcProb === null) return;
       const combined =
         (Number.isFinite(noaaProb) ? noaaProb * noaaWeight : 0) +
-        (Number.isFinite(twcProb) ? twcProb * twcWeight : 0);
+        (Number.isFinite(twcProb) ? twcProb * twcWeight : 0) +
+        implied * kalshiWeight;
       const edge = combined - implied - FEE_BUFFER;
       if (edge > bestEdge) {
         bestEdge = edge;
@@ -1078,7 +1081,8 @@ async function decideClimateMarketForEvent(event) {
 
     const combined =
       (Number.isFinite(noaaProb) ? noaaProb * noaaWeight : 0) +
-      (Number.isFinite(twcProb) ? twcProb * twcWeight : 0);
+      (Number.isFinite(twcProb) ? twcProb * twcWeight : 0) +
+      implied * kalshiWeight;
     const edge = combined - implied - FEE_BUFFER;
 
     if (edge > bestEdge) {
