@@ -183,6 +183,15 @@ function formatPriceDollars(value) {
   return normalized.toFixed(4);
 }
 
+function extractPriceFromRanges(market) {
+  const ranges = Array.isArray(market?.price_ranges) ? market.price_ranges : [];
+  if (!ranges.length) return null;
+  const first = ranges[0];
+  const start = toNumber(first?.start);
+  if (!Number.isFinite(start)) return null;
+  return formatPriceDollars(start);
+}
+
 const CITY_GEOCODES = [
   { name: "New York City", aliases: ["nyc", "new york city", "new york"], geocode: "40.7128,-74.0060" },
   { name: "Chicago", aliases: ["chicago"], geocode: "41.8781,-87.6298" },
@@ -736,7 +745,11 @@ async function decideClimateMarketForEvent(event) {
   return { chosen, forecast, aiTicker };
 }
 
-async function placeClimateDailyTrades({ amountCents, useSandbox } = {}) {
+async function placeClimateDailyTrades({
+  amountCents,
+  useSandbox,
+  dryRun = false,
+} = {}) {
   const events = await getClimateDailyEvents({ useSandbox });
   const trades = [];
 
@@ -746,26 +759,21 @@ async function placeClimateDailyTrades({ amountCents, useSandbox } = {}) {
       let priceDollars = formatPriceDollars(
         extractYesPriceDollars(decision.chosen)
       );
+      let market = null;
       if (!priceDollars) {
-        const market = await getMarketByTicker(decision.chosen?.ticker, {
+        market = await getMarketByTicker(decision.chosen?.ticker, {
           useSandbox,
         });
         priceDollars = formatPriceDollars(extractYesPriceDollars(market));
+      }
+      if (!priceDollars && market) {
+        priceDollars = extractPriceFromRanges(market);
       }
       if (!priceDollars) {
         const error = new Error("Missing market price for order");
         error.details = { ticker: decision.chosen?.ticker };
         throw error;
       }
-      const trade = await placeKalshiTrade({
-        amountCents: amountCents || CLIMATE_TRADE_AMOUNT_CENTS,
-        ticker: decision.chosen.ticker,
-        side: "yes",
-        action: "buy",
-        type: "market",
-        priceDollars,
-        useSandbox,
-      });
       trades.push({
         eventTicker: event.event_ticker,
         eventTitle: event.title,
@@ -779,8 +787,22 @@ async function placeClimateDailyTrades({ amountCents, useSandbox } = {}) {
           lowTemp: decision.forecast?.lowTemp,
           city: decision.forecast?.city,
         },
-        trade,
+        dryRun,
+        priceDollars,
+        amountCents: amountCents || CLIMATE_TRADE_AMOUNT_CENTS,
       });
+      if (!dryRun) {
+        const trade = await placeKalshiTrade({
+          amountCents: amountCents || CLIMATE_TRADE_AMOUNT_CENTS,
+          ticker: decision.chosen.ticker,
+          side: "yes",
+          action: "buy",
+          type: "market",
+          priceDollars,
+          useSandbox,
+        });
+        trades[trades.length - 1].trade = trade;
+      }
     } catch (error) {
       trades.push({
         eventTicker: event?.event_ticker,

@@ -20,6 +20,7 @@ const tradeAmountCents = Number(process.env.TRADE_AMOUNT_CENTS || 1000);
 const autoStrategy =
   process.env.KALSHI_AUTO_STRATEGY || "climate-daily";
 const sandboxByDefault = process.env.KALSHI_USE_SANDBOX === "true";
+const dryRunByDefault = process.env.DRY_RUN_TRADES === "true";
 
 function parseBoolean(value) {
   if (typeof value === "boolean") return value;
@@ -189,7 +190,12 @@ app.post("/api/trade/climate-daily", async (req, res) => {
   try {
     const amountCents = Number(req.body?.amountCents || 0) || undefined;
     const useSandbox = parseBoolean(req.body?.sandbox) || sandboxByDefault;
-    const trades = await placeClimateDailyTrades({ amountCents, useSandbox });
+    const dryRun = parseBoolean(req.body?.dryRun) || dryRunByDefault;
+    const trades = await placeClimateDailyTrades({
+      amountCents,
+      useSandbox,
+      dryRun,
+    });
     lastTrade = trades;
     lastTradeError = null;
     res.json({ trades });

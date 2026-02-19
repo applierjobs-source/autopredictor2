@@ -5,6 +5,7 @@ const eventsStatusEl = document.getElementById("eventsStatus");
 const eventsBodyEl = document.getElementById("eventsBody");
 const amountInput = document.getElementById("amountInput");
 const sandboxToggle = document.getElementById("sandboxToggle");
+const dryRunToggle = document.getElementById("dryRunToggle");
 
 function renderStatus(payload) {
   if (!payload) {
@@ -45,12 +46,13 @@ async function placeClimateTrades() {
     ? Math.max(1, Math.round(amountDollars * 100))
     : undefined;
   const sandbox = Boolean(sandboxToggle.checked);
+  const dryRun = Boolean(dryRunToggle.checked);
 
   try {
     const response = await fetch("/api/trade/climate-daily", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amountCents, sandbox }),
+      body: JSON.stringify({ amountCents, sandbox, dryRun }),
     });
 
     const data = await response.json();
