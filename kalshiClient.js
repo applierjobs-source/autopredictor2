@@ -634,7 +634,8 @@ async function getClimateDailyEvents({
         event?.close_time ||
         event?.latest_expiration_time ||
         event?.expected_expiration_time;
-      const eventDate = closeAt ? new Date(closeAt) : extractEventDate(event);
+      const eventDate =
+        extractEventDate(event) || (closeAt ? new Date(closeAt) : null);
       if (!eventDate) return;
       const closeKey = formatDateInTimeZone(eventDate, timeZone);
       if (closeKey !== targetKey) return;
@@ -654,7 +655,8 @@ async function getClimateDailyEvents({
           event?.close_time ||
           event?.latest_expiration_time ||
           event?.expected_expiration_time;
-        const eventDate = closeAt ? new Date(closeAt) : extractEventDate(event);
+        const eventDate =
+          extractEventDate(event) || (closeAt ? new Date(closeAt) : null);
         if (!eventDate) return;
         upcoming.push({ event, closeAt: eventDate.toISOString() });
       });
@@ -1242,7 +1244,17 @@ async function placeClimateDailyTrades({
 
   for (const event of events) {
     try {
-      const eventDate = extractEventDate(event);
+      const eventDate =
+        extractEventDate(event) ||
+        (event?.close_time ||
+        event?.latest_expiration_time ||
+        event?.expected_expiration_time
+          ? new Date(
+              event.close_time ||
+                event.latest_expiration_time ||
+                event.expected_expiration_time
+            )
+          : null);
       if (eventDate) {
         const eventKey = formatDateInTimeZone(eventDate, MARKET_TIMEZONE);
         if (eventKey !== targetKey) {
