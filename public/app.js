@@ -6,6 +6,7 @@ const eventsBodyEl = document.getElementById("eventsBody");
 const amountInput = document.getElementById("amountInput");
 const sandboxToggle = document.getElementById("sandboxToggle");
 const dryRunToggle = document.getElementById("dryRunToggle");
+let lastRunByEvent = {};
 
 function renderStatus(payload) {
   if (!payload) {
@@ -57,6 +58,8 @@ async function placeClimateTrades() {
 
     const data = await response.json();
     renderStatus(data);
+    lastRunByEvent = buildRunLookup(data?.trades || []);
+    renderEvents(lastRunByEvent);
   } catch (error) {
     renderStatus({ error: { message: error?.message || "Request failed" } });
   } finally {
@@ -78,8 +81,18 @@ function formatCell(value) {
   return value;
 }
 
-function renderEvents(events) {
+function buildRunLookup(trades) {
+  return trades.reduce((acc, trade) => {
+    if (trade?.eventTicker) {
+      acc[trade.eventTicker] = trade;
+    }
+    return acc;
+  }, {});
+}
+
+function renderEvents(runLookup) {
   eventsBodyEl.innerHTML = "";
+  const events = window.currentEvents || [];
   if (!events.length) {
     eventsStatusEl.textContent = "No climate events found.";
     return;
@@ -93,11 +106,18 @@ function renderEvents(events) {
       .map((market) => market.label)
       .filter(Boolean)
       .join(", ");
+    const trade = runLookup?.[event.eventTicker];
+    const forecastHigh =
+      trade?.forecast?.highTemp !== undefined ? trade.forecast.highTemp : "—";
+    const forecastLow =
+      trade?.forecast?.lowTemp !== undefined ? trade.forecast.lowTemp : "—";
 
     row.innerHTML = `
       <td>${formatCell(event.eventTicker)}</td>
       <td>${formatCell(event.closeTime)}</td>
       <td>${formatCell(event.title)}</td>
+      <td>${formatCell(forecastHigh)}</td>
+      <td>${formatCell(forecastLow)}</td>
       <td>${formatCell(marketLabels)}</td>
     `;
     eventsBodyEl.appendChild(row);
@@ -118,7 +138,8 @@ async function fetchEvents() {
       eventsStatusEl.textContent = data.error.message || "Failed to load events.";
       return;
     }
-    renderEvents(data.events || []);
+    window.currentEvents = data.events || [];
+    renderEvents(lastRunByEvent);
   } catch (error) {
     eventsStatusEl.textContent = error?.message || "Failed to load events.";
   }
