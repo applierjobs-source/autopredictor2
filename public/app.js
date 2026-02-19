@@ -6,6 +6,7 @@ const eventsBodyEl = document.getElementById("eventsBody");
 const amountInput = document.getElementById("amountInput");
 const sandboxToggle = document.getElementById("sandboxToggle");
 const dryRunToggle = document.getElementById("dryRunToggle");
+const daySelect = document.getElementById("daySelect");
 let lastRunByEvent = {};
 
 function renderStatus(payload) {
@@ -48,12 +49,13 @@ async function placeClimateTrades() {
     : undefined;
   const sandbox = Boolean(sandboxToggle.checked);
   const dryRun = Boolean(dryRunToggle.checked);
+  const daysAhead = Number.parseInt(daySelect?.value || "1", 10);
 
   try {
     const response = await fetch("/api/trade/climate-daily", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amountCents, sandbox, dryRun }),
+      body: JSON.stringify({ amountCents, sandbox, dryRun, daysAhead }),
     });
 
     const data = await response.json();
@@ -141,10 +143,11 @@ async function fetchEvents() {
   eventsStatusEl.textContent = "Loading events...";
   eventsBodyEl.innerHTML = "";
   const sandbox = Boolean(sandboxToggle.checked);
+  const daysAhead = Number.parseInt(daySelect?.value || "1", 10);
 
   try {
     const response = await fetch(
-      `/api/climate/events?sandbox=${sandbox ? "true" : "false"}`
+      `/api/climate/events?sandbox=${sandbox ? "true" : "false"}&daysAhead=${daysAhead}`
     );
     const data = await response.json();
     if (data.error) {
@@ -161,6 +164,7 @@ async function fetchEvents() {
 runButton.addEventListener("click", placeClimateTrades);
 refreshEventsButton.addEventListener("click", fetchEvents);
 amountInput.addEventListener("input", updateRunLabel);
+daySelect.addEventListener("change", fetchEvents);
 fetchLastTrade();
 fetchEvents();
 updateRunLabel();

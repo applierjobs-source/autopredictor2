@@ -576,9 +576,10 @@ async function getEventsForSeries(seriesTicker, { useSandbox } = {}) {
 async function getClimateDailyEvents({
   timeZone = MARKET_TIMEZONE,
   useSandbox,
+  daysAhead = 1,
 } = {}) {
   const now = Date.now();
-  const cacheKey = useSandbox ? "sandbox" : "prod";
+  const cacheKey = `${useSandbox ? "sandbox" : "prod"}:${daysAhead}`;
   const cached = climateEventsCache.get(cacheKey);
   if (cached && now < cached.expiresAt) {
     return cached.value;
@@ -619,7 +620,9 @@ async function getClimateDailyEvents({
     return categoryMatches || tagMatches || titleMatches;
   });
 
-  const todayKey = formatDateInTimeZone(new Date(), timeZone);
+  const targetDate = new Date();
+  targetDate.setDate(targetDate.getDate() + daysAhead);
+  const targetKey = formatDateInTimeZone(targetDate, timeZone);
   const events = [];
 
   const limitedSeries = dailySeries.slice(0, Math.max(1, CLIMATE_MAX_SERIES));
@@ -634,7 +637,7 @@ async function getClimateDailyEvents({
       const eventDate = closeAt ? new Date(closeAt) : extractEventDate(event);
       if (!eventDate) return;
       const closeKey = formatDateInTimeZone(eventDate, timeZone);
-      if (closeKey !== todayKey) return;
+      if (closeKey !== targetKey) return;
       events.push(event);
     });
     await sleep(120);
@@ -670,9 +673,49 @@ async function getClimateDailyEvents({
   return events;
 }
 
-async function getWeatherForecastForCity(title) {
+function resolveForecastIndex(data, targetDate, timeZone, daysAhead) {
+  const targetKey = formatDateInTimeZone(targetDate, timeZone);
+  const validTimes = Array.isArray(data?.validTimeLocal)
+    ? data.validTimeLocal
+    : Array.isArray(data?.validTimeUtc)
+    ? data.validTimeUtc
+    : null;
+  if (validTimes) {
+    for (let i = 0; i < validTimes.length; i += 1) {
+      const dateValue = new Date(validTimes[i]);
+      if (Number.isNaN(dateValue.valueOf())) continue;
+      const key = formatDateInTimeZone(dateValue, timeZone);
+      if (key === targetKey) return i;
+    }
+  }
+  if (Number.isFinite(daysAhead)) {
+    return Math.max(0, daysAhead);
+  }
+  return 0;
+}
+
+function valueAtIndex(value, index) {
+  if (Array.isArray(value)) {
+    return value[index];
+  }
+  return value;
+}
+
+function daypartValueAtIndex(daypart, field, index) {
+  const values = daypart ? daypart[field] : null;
+  if (!Array.isArray(values)) return null;
+  const dayIndex = index * 2;
+  return values[dayIndex];
+}
+
+async function getWeatherForecastForCity(title, targetDate, daysAhead = 1) {
   if (!WEATHERCOMPANY_API_KEY) {
     throw new Error("Missing WEATHERCOMPANY_API_KEY");
+  }
+  const resolvedTargetDate =
+    targetDate instanceof Date ? targetDate : new Date();
+  if (!(targetDate instanceof Date)) {
+    resolvedTargetDate.setDate(resolvedTargetDate.getDate() + daysAhead);
   }
   const match = findCityFromTitle(title);
   if (!match) {
@@ -734,18 +777,32 @@ async function getWeatherForecastForCity(title) {
     if (isTWC) {
       const fallback = await fetchWeather("https://api.weather.com");
       if (fallback.ok) {
+        const index = resolveForecastIndex(
+          fallback.data,
+          resolvedTargetDate,
+          MARKET_TIMEZONE,
+          daysAhead
+        );
+        const daypart = Array.isArray(fallback.data?.daypart)
+          ? fallback.data.daypart[0]
+          : null;
         return {
           city: match.name,
           geocode: match.geocode,
           highTemp: toNumber(
-            Array.isArray(fallback.data?.temperatureMax)
-              ? fallback.data.temperatureMax[0]
-              : fallback.data?.temperatureMax
+            valueAtIndex(fallback.data?.temperatureMax, index) ??
+              valueAtIndex(fallback.data?.calendarDayTemperatureMax, index) ??
+              daypartValueAtIndex(daypart, "temperature", index)
           ),
           lowTemp: toNumber(
-            Array.isArray(fallback.data?.temperatureMin)
-              ? fallback.data.temperatureMin[0]
-              : fallback.data?.temperatureMin
+            valueAtIndex(fallback.data?.temperatureMin, index) ??
+              valueAtIndex(fallback.data?.calendarDayTemperatureMin, index) ??
+              daypartValueAtIndex(daypart, "temperatureMin", index)
+          ),
+          precipProbability: normalizeProbability(
+            valueAtIndex(fallback.data?.precipChance, index) ??
+              valueAtIndex(fallback.data?.precipProbability, index) ??
+              daypartValueAtIndex(daypart, "precipChance", index)
           ),
           raw: fallback.data,
         };
@@ -761,26 +818,26 @@ async function getWeatherForecastForCity(title) {
   }
 
   const data = primary.data;
-
-  const fromArray = (value) =>
-    Array.isArray(value) ? value[0] : value;
+  const index = resolveForecastIndex(
+    data,
+    resolvedTargetDate,
+    MARKET_TIMEZONE,
+    daysAhead
+  );
   const daypart = Array.isArray(data?.daypart) ? data.daypart[0] : null;
-  const daypartTemp = daypart ? fromArray(daypart.temperature) : null;
-  const daypartTempMin = daypart ? fromArray(daypart.temperatureMin) : null;
-  const daypartPrecip = daypart ? fromArray(daypart.precipChance) : null;
 
   const highTemp =
-    fromArray(data?.temperatureMax) ??
-    fromArray(data?.calendarDayTemperatureMax) ??
-    daypartTemp;
+    valueAtIndex(data?.temperatureMax, index) ??
+    valueAtIndex(data?.calendarDayTemperatureMax, index) ??
+    daypartValueAtIndex(daypart, "temperature", index);
   const lowTemp =
-    fromArray(data?.temperatureMin) ??
-    fromArray(data?.calendarDayTemperatureMin) ??
-    daypartTempMin;
+    valueAtIndex(data?.temperatureMin, index) ??
+    valueAtIndex(data?.calendarDayTemperatureMin, index) ??
+    daypartValueAtIndex(daypart, "temperatureMin", index);
   const precipProbability = normalizeProbability(
-    fromArray(data?.precipChance) ??
-      fromArray(data?.precipProbability) ??
-      daypartPrecip
+    valueAtIndex(data?.precipChance, index) ??
+      valueAtIndex(data?.precipProbability, index) ??
+      daypartValueAtIndex(daypart, "precipChance", index)
   );
 
   return {
@@ -903,7 +960,7 @@ function updateErrorModel(model, stationId, forecastHistory, dailyObs) {
   return model;
 }
 
-async function getNoaaForecastAndModel(title) {
+async function getNoaaForecastAndModel(title, targetDate) {
   const city = findCityFromTitle(title);
   if (!city) {
     const error = new Error("Unable to map city from event title");
@@ -911,9 +968,12 @@ async function getNoaaForecastAndModel(title) {
     throw error;
   }
   const geocode = city.geocode;
-  const targetDate = new Date();
-  targetDate.setUTCDate(targetDate.getUTCDate() + 1);
-  const forecast = await getNwsForecastForDate(geocode, targetDate);
+  const resolvedTargetDate =
+    targetDate instanceof Date ? targetDate : new Date();
+  if (!(targetDate instanceof Date)) {
+    resolvedTargetDate.setUTCDate(resolvedTargetDate.getUTCDate() + 1);
+  }
+  const forecast = await getNwsForecastForDate(geocode, resolvedTargetDate);
   const forecastHigh = forecast?.temperature ?? null;
   const precipProbability = forecast?.precipProbability ?? null;
   const stationId = await getNwsStationId(geocode);
@@ -923,7 +983,7 @@ async function getNoaaForecastAndModel(title) {
 
   if (stationId) {
     const stationHistory = history[stationId] || {};
-    const dateKey = formatDateInTimeZone(targetDate, "UTC");
+    const dateKey = formatDateInTimeZone(resolvedTargetDate, "UTC");
     if (Number.isFinite(forecastHigh)) {
       stationHistory[dateKey] = forecastHigh;
       history[stationId] = stationHistory;
@@ -1012,7 +1072,10 @@ async function pickMarketWithOpenAI({ eventTitle, markets, forecast }) {
   }
 }
 
-async function decideClimateMarketForEvent(event) {
+async function decideClimateMarketForEvent(
+  event,
+  { targetDate, daysAhead } = {}
+) {
   const markets = Array.isArray(event?.markets) ? event.markets : [];
   if (!markets.length) {
     const error = new Error("No markets on event");
@@ -1020,8 +1083,12 @@ async function decideClimateMarketForEvent(event) {
     throw error;
   }
 
-  const forecast = await getWeatherForecastForCity(event?.title || "");
-  const noaa = await getNoaaForecastAndModel(event?.title || "");
+  const forecast = await getWeatherForecastForCity(
+    event?.title || "",
+    targetDate,
+    daysAhead
+  );
+  const noaa = await getNoaaForecastAndModel(event?.title || "", targetDate);
   const rainMarket = isRainMarket(event?.title || "");
   const forecastValue = selectForecastValue(event?.title, forecast);
   const noaaValue = selectForecastValue(event?.title, {
@@ -1165,11 +1232,12 @@ async function placeClimateDailyTrades({
   amountCents,
   useSandbox,
   dryRun = false,
+  daysAhead = 1,
 } = {}) {
-  const events = await getClimateDailyEvents({ useSandbox });
+  const events = await getClimateDailyEvents({ useSandbox, daysAhead });
   const trades = [];
   const targetDate = new Date();
-  targetDate.setDate(targetDate.getDate() + 1);
+  targetDate.setDate(targetDate.getDate() + daysAhead);
   const targetKey = formatDateInTimeZone(targetDate, MARKET_TIMEZONE);
 
   for (const event of events) {
@@ -1182,12 +1250,15 @@ async function placeClimateDailyTrades({
             eventTicker: event.event_ticker,
             eventTitle: event.title,
             skipped: true,
-            skipReason: "date_not_tomorrow",
+            skipReason: "date_not_target",
           });
           continue;
         }
       }
-      const decision = await decideClimateMarketForEvent(event);
+      const decision = await decideClimateMarketForEvent(event, {
+        targetDate,
+        daysAhead,
+      });
       let priceDollars = formatPriceDollars(
         extractYesPriceDollars(decision.chosen)
       );

@@ -28,6 +28,11 @@ function parseBoolean(value) {
   return ["true", "1", "yes", "on"].includes(value.toLowerCase());
 }
 
+function parseInteger(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 let lastTrade = null;
 let lastTradeError = null;
 
@@ -69,7 +74,8 @@ app.get("/api/bets/expiring-today", async (req, res) => {
 app.get("/api/climate/events", async (req, res) => {
   try {
     const useSandbox = parseBoolean(req.query?.sandbox) || sandboxByDefault;
-    const events = await getClimateDailyEvents({ useSandbox });
+    const daysAhead = parseInteger(req.query?.daysAhead, 1);
+    const events = await getClimateDailyEvents({ useSandbox, daysAhead });
     const payload = events.map((event) => ({
       eventTicker: event.event_ticker,
       title: event.title,
@@ -191,10 +197,12 @@ app.post("/api/trade/climate-daily", async (req, res) => {
     const amountCents = Number(req.body?.amountCents || 0) || undefined;
     const useSandbox = parseBoolean(req.body?.sandbox) || sandboxByDefault;
     const dryRun = parseBoolean(req.body?.dryRun) || dryRunByDefault;
+    const daysAhead = parseInteger(req.body?.daysAhead, 1);
     const trades = await placeClimateDailyTrades({
       amountCents,
       useSandbox,
       dryRun,
+      daysAhead,
     });
     lastTrade = trades;
     lastTradeError = null;

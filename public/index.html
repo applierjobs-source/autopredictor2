@@ -82,11 +82,18 @@
           <input id="dryRunToggle" type="checkbox" />
           Dry run (no orders)
         </label>
+        <label>
+          Trade day
+          <select id="daySelect">
+            <option value="1" selected>Tomorrow</option>
+            <option value="0">Today</option>
+          </select>
+        </label>
         <button id="runButton">Run climate trades</button>
       </div>
       <div class="status" id="status">Waiting for trade...</div>
 
-      <h2>Daily Climate Events</h2>
+      <h2>Climate Events</h2>
       <p class="muted">
         These events are pulled from Kalshi's daily climate category.
       </p>
