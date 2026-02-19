@@ -37,7 +37,15 @@ let lastTrade = null;
 let lastTradeError = null;
 
 app.use(express.json({ limit: "100kb" }));
-app.use(express.static(path.join(__dirname, "public")));
+app.use(
+  express.static(path.join(__dirname, "public"), {
+    etag: false,
+    maxAge: 0,
+    setHeaders: (res) => {
+      res.setHeader("Cache-Control", "no-store");
+    },
+  })
+);
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
@@ -224,7 +232,7 @@ app.post("/api/trade/climate-daily", async (req, res) => {
     });
     lastTrade = trades;
     lastTradeError = null;
-    res.json({ trades });
+    res.json({ trades, meta: { daysAhead, useSandbox, dryRun } });
   } catch (error) {
     lastTradeError = {
       message: error?.message || "Climate daily trade failed",

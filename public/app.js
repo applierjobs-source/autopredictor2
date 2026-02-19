@@ -26,11 +26,14 @@ function renderStatus(payload) {
 
   if (payload.trade || payload.trades) {
     const label = payload.trades ? "Trades placed" : "Trade placed";
+    const metaLine = payload.meta
+      ? `\n\nRun settings: daysAhead=${payload.meta.daysAhead} sandbox=${payload.meta.useSandbox} dryRun=${payload.meta.dryRun}`
+      : "";
     statusEl.textContent = `${label}:\n${JSON.stringify(
       payload.trades || payload.trade,
       null,
       2
-    )}`;
+    )}${metaLine}`;
   }
 }
 
