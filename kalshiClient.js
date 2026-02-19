@@ -385,10 +385,15 @@ function parseEventDateFromTicker(ticker) {
 }
 
 function extractEventDate(event) {
-  return (
+  const fromTitle =
     parseEventDateFromTitle(event?.title) ||
-    parseEventDateFromTicker(event?.event_ticker)
-  );
+    parseEventDateFromTicker(event?.event_ticker);
+  if (fromTitle) return fromTitle;
+  const closeAt =
+    event?.close_time ||
+    event?.latest_expiration_time ||
+    event?.expected_expiration_time;
+  return closeAt ? new Date(closeAt) : null;
 }
 
 function findCityFromTitle(title) {
@@ -1159,9 +1164,25 @@ async function placeClimateDailyTrades({
 } = {}) {
   const events = await getClimateDailyEvents({ useSandbox });
   const trades = [];
+  const targetDate = new Date();
+  targetDate.setDate(targetDate.getDate() + 1);
+  const targetKey = formatDateInTimeZone(targetDate, MARKET_TIMEZONE);
 
   for (const event of events) {
     try {
+      const eventDate = extractEventDate(event);
+      if (eventDate) {
+        const eventKey = formatDateInTimeZone(eventDate, MARKET_TIMEZONE);
+        if (eventKey !== targetKey) {
+          trades.push({
+            eventTicker: event.event_ticker,
+            eventTitle: event.title,
+            skipped: true,
+            skipReason: "date_not_tomorrow",
+          });
+          continue;
+        }
+      }
       const decision = await decideClimateMarketForEvent(event);
       let priceDollars = formatPriceDollars(
         extractYesPriceDollars(decision.chosen)
@@ -1238,11 +1259,21 @@ async function placeClimateDailyTrades({
         trades[trades.length - 1].trade = trade;
       }
     } catch (error) {
+      const message = error?.message || "Trade failed";
+      if (message.includes("map city")) {
+        trades.push({
+          eventTicker: event?.event_ticker,
+          eventTitle: event?.title,
+          skipped: true,
+          skipReason: "unsupported_location",
+        });
+        continue;
+      }
       trades.push({
         eventTicker: event?.event_ticker,
         eventTitle: event?.title,
         error: {
-          message: error?.message || "Trade failed",
+          message,
           details: error?.details || null,
         },
       });
