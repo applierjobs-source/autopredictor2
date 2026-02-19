@@ -358,7 +358,7 @@ function parseEventDateFromTitle(title) {
     dec: 11,
   };
   if (!(month in months) || !day || !year) return null;
-  return new Date(Date.UTC(year, months[month], day));
+  return new Date(Date.UTC(year, months[month], day, 12));
 }
 
 function parseEventDateFromTicker(ticker) {
@@ -382,7 +382,7 @@ function parseEventDateFromTicker(ticker) {
     dec: 11,
   };
   if (!(month in months) || !day || !year) return null;
-  return new Date(Date.UTC(year, months[month], day));
+  return new Date(Date.UTC(year, months[month], day, 12));
 }
 
 function extractEventDate(event) {
