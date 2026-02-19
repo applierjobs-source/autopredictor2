@@ -64,6 +64,8 @@ event list. It uses the Kalshi Trade API with RSA-PSS authentication.
 - `TWC_WEIGHT`: Weight for TWC probability in mixture.
 - `KALSHI_EDGE_THRESHOLD`: Minimum edge required (default `0.03`).
 - `KALSHI_FEE_BUFFER`: Fee buffer subtracted from edge (default `0.01`).
+- `KALSHI_MAX_DIVERGENCE_F`: Skip trades when NOAA/TWC differ by more than this (F).
+- `PRECIP_DISAGREE_THRESHOLD`: Min precip prob diff for rain trades (default `0.1`).
 - `OPENAI_API_KEY`: OpenAI API key.
 - `OPENAI_MODEL`: OpenAI model to use (default `gpt-4o-mini`).
 - `KALSHI_MAX_RETRIES`: Retry attempts on 429s (default `3`).

@@ -48,6 +48,10 @@ const NOAA_WEIGHT = Number(process.env.NOAA_WEIGHT || 0.5);
 const TWC_WEIGHT = Number(process.env.TWC_WEIGHT || 0.5);
 const EDGE_THRESHOLD = Number(process.env.KALSHI_EDGE_THRESHOLD || 0.03);
 const FEE_BUFFER = Number(process.env.KALSHI_FEE_BUFFER || 0.01);
+const MAX_DIVERGENCE_F = Number(process.env.KALSHI_MAX_DIVERGENCE_F || 10);
+const PRECIP_DISAGREE_THRESHOLD = Number(
+  process.env.PRECIP_DISAGREE_THRESHOLD || 0.1
+);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const KALSHI_MAX_RETRIES = Number(process.env.KALSHI_MAX_RETRIES || 3);
@@ -254,6 +258,18 @@ function extractImpliedProbability(market) {
     toNumber(market?.last_price);
   if (!Number.isFinite(price)) return null;
   return Math.max(0, Math.min(1, price));
+}
+
+function normalizeProbability(value) {
+  const parsed = toNumber(value);
+  if (!Number.isFinite(parsed)) return null;
+  if (parsed > 1) return Math.max(0, Math.min(1, parsed / 100));
+  return Math.max(0, Math.min(1, parsed));
+}
+
+function isRainMarket(eventTitle) {
+  const normalized = normalizeText(eventTitle);
+  return normalized.includes("rain");
 }
 
 function formatPriceDollars(value) {
@@ -745,6 +761,7 @@ async function getWeatherForecastForCity(title) {
   const daypart = Array.isArray(data?.daypart) ? data.daypart[0] : null;
   const daypartTemp = daypart ? fromArray(daypart.temperature) : null;
   const daypartTempMin = daypart ? fromArray(daypart.temperatureMin) : null;
+  const daypartPrecip = daypart ? fromArray(daypart.precipChance) : null;
 
   const highTemp =
     fromArray(data?.temperatureMax) ??
@@ -754,12 +771,18 @@ async function getWeatherForecastForCity(title) {
     fromArray(data?.temperatureMin) ??
     fromArray(data?.calendarDayTemperatureMin) ??
     daypartTempMin;
+  const precipProbability = normalizeProbability(
+    fromArray(data?.precipChance) ??
+      fromArray(data?.precipProbability) ??
+      daypartPrecip
+  );
 
   return {
     city: match.name,
     geocode: match.geocode,
     highTemp: toNumber(highTemp),
     lowTemp: toNumber(lowTemp),
+    precipProbability,
     raw: data,
   };
 }
@@ -784,7 +807,7 @@ async function getNwsPoint(geocode) {
   return fetchNwsJson(url);
 }
 
-async function getNwsForecastHigh(geocode, targetDate) {
+async function getNwsForecastForDate(geocode, targetDate) {
   const point = await getNwsPoint(geocode);
   const forecastUrl = point?.properties?.forecast;
   if (!forecastUrl) {
@@ -802,7 +825,12 @@ async function getNwsForecastHigh(geocode, targetDate) {
     return startKey === targetKey;
   });
   const selected = target || fallback;
-  return selected?.temperature ?? null;
+  return {
+    temperature: selected?.temperature ?? null,
+    precipProbability: normalizeProbability(
+      selected?.probabilityOfPrecipitation?.value
+    ),
+  };
 }
 
 async function getNwsStationId(geocode) {
@@ -879,7 +907,9 @@ async function getNoaaForecastAndModel(title) {
   const geocode = city.geocode;
   const targetDate = new Date();
   targetDate.setUTCDate(targetDate.getUTCDate() + 1);
-  const forecastHigh = await getNwsForecastHigh(geocode, targetDate);
+  const forecast = await getNwsForecastForDate(geocode, targetDate);
+  const forecastHigh = forecast?.temperature ?? null;
+  const precipProbability = forecast?.precipProbability ?? null;
   const stationId = await getNwsStationId(geocode);
 
   let model = loadJson(noaaModelPath, {});
@@ -913,6 +943,7 @@ async function getNoaaForecastAndModel(title) {
     city: city.name,
     geocode,
     forecastHigh: toNumber(forecastHigh),
+    precipProbability,
     bias,
     std,
   };
@@ -985,6 +1016,7 @@ async function decideClimateMarketForEvent(event) {
 
   const forecast = await getWeatherForecastForCity(event?.title || "");
   const noaa = await getNoaaForecastAndModel(event?.title || "");
+  const rainMarket = isRainMarket(event?.title || "");
   const forecastValue = selectForecastValue(event?.title, forecast);
   const noaaValue = selectForecastValue(event?.title, {
     highTemp: noaa.forecastHigh,
@@ -999,13 +1031,35 @@ async function decideClimateMarketForEvent(event) {
   let bestMeta = null;
 
   markets.forEach((market) => {
+    const implied = extractImpliedProbability(market);
+    if (!Number.isFinite(implied)) return;
+
+    if (rainMarket) {
+      const noaaProb = normalizeProbability(noaa.precipProbability);
+      const twcProb = normalizeProbability(forecast.precipProbability);
+      if (noaaProb === null && twcProb === null) return;
+      const combined =
+        (Number.isFinite(noaaProb) ? noaaProb * noaaWeight : 0) +
+        (Number.isFinite(twcProb) ? twcProb * twcWeight : 0);
+      const edge = combined - implied - FEE_BUFFER;
+      if (edge > bestEdge) {
+        bestEdge = edge;
+        bestMeta = {
+          market,
+          range: null,
+          implied,
+          combined,
+          noaaProb,
+          twcProb,
+        };
+      }
+      return;
+    }
+
     const range = parseTemperatureRange(
       market?.yes_sub_title || market?.title || market?.ticker
     );
     if (!range) return;
-    const implied = extractImpliedProbability(market);
-    if (!Number.isFinite(implied)) return;
-
     const noaaMean = Number.isFinite(noaaValue) ? noaaValue + noaa.bias : null;
     const twcMean = Number.isFinite(forecastValue) ? forecastValue : null;
 
@@ -1043,26 +1097,42 @@ async function decideClimateMarketForEvent(event) {
 
   const chosen = bestMeta.market;
   const strike = rangeStrike(bestMeta.range);
-  const divergence =
-    Number.isFinite(forecastValue) && Number.isFinite(noaaValue)
-      ? forecastValue - noaaValue
-      : null;
-  const withinStrike =
-    Number.isFinite(strike) &&
-    (Number.isFinite(forecastValue) || Number.isFinite(noaaValue)) &&
-    Math.min(
-      Number.isFinite(forecastValue)
-        ? Math.abs(forecastValue - strike)
-        : Infinity,
-      Number.isFinite(noaaValue) ? Math.abs(noaaValue - strike) : Infinity
-    ) <= 3;
-  const disagree =
-    Number.isFinite(forecastValue) &&
-    Number.isFinite(noaaValue) &&
-    Math.abs(forecastValue - noaaValue) >= 2;
+  const divergence = rainMarket
+    ? Number.isFinite(forecast.precipProbability) &&
+      Number.isFinite(noaa.precipProbability)
+      ? normalizeProbability(forecast.precipProbability) -
+        normalizeProbability(noaa.precipProbability)
+      : null
+    : Number.isFinite(forecastValue) && Number.isFinite(noaaValue)
+    ? forecastValue - noaaValue
+    : null;
+  const withinStrike = rainMarket
+    ? true
+    : Number.isFinite(strike) &&
+      (Number.isFinite(forecastValue) || Number.isFinite(noaaValue)) &&
+      Math.min(
+        Number.isFinite(forecastValue)
+          ? Math.abs(forecastValue - strike)
+          : Infinity,
+        Number.isFinite(noaaValue) ? Math.abs(noaaValue - strike) : Infinity
+      ) <= 3;
+  const disagree = rainMarket
+    ? Number.isFinite(forecast.precipProbability) &&
+      Number.isFinite(noaa.precipProbability) &&
+      Math.abs(
+        normalizeProbability(forecast.precipProbability) -
+          normalizeProbability(noaa.precipProbability)
+      ) >= PRECIP_DISAGREE_THRESHOLD
+    : Number.isFinite(forecastValue) &&
+      Number.isFinite(noaaValue) &&
+      Math.abs(forecastValue - noaaValue) >= 2;
 
+  const maxDivergenceExceeded = rainMarket
+    ? false
+    : Number.isFinite(divergence) && Math.abs(divergence) > MAX_DIVERGENCE_F;
   const edgeRequired = Math.max(EDGE_THRESHOLD, FEE_BUFFER);
-  const shouldTrade = bestEdge >= edgeRequired;
+  const shouldTrade =
+    bestEdge >= edgeRequired && withinStrike && disagree && !maxDivergenceExceeded;
 
   return {
     chosen,
@@ -1077,6 +1147,7 @@ async function decideClimateMarketForEvent(event) {
     divergence,
     withinStrike,
     disagree,
+    maxDivergenceExceeded,
     shouldTrade,
   };
 }
@@ -1125,6 +1196,7 @@ async function placeClimateDailyTrades({
         },
         noaa: {
           highTemp: decision.noaa?.forecastHigh,
+          precipProbability: decision.noaa?.precipProbability,
           bias: decision.noaa?.bias,
           std: decision.noaa?.std,
         },
@@ -1137,13 +1209,20 @@ async function placeClimateDailyTrades({
         edgeRequired: decision.edgeRequired,
         withinStrike: decision.withinStrike,
         disagree: decision.disagree,
+        maxDivergenceExceeded: decision.maxDivergenceExceeded,
         dryRun,
         priceDollars,
         amountCents: amountCents || CLIMATE_TRADE_AMOUNT_CENTS,
       });
       if (!decision.shouldTrade) {
         trades[trades.length - 1].skipped = true;
-        trades[trades.length - 1].skipReason = "edge_below_threshold";
+        if (decision.maxDivergenceExceeded) {
+          trades[trades.length - 1].skipReason = "max_divergence_exceeded";
+        } else if (!decision.withinStrike || !decision.disagree) {
+          trades[trades.length - 1].skipReason = "filter_not_met";
+        } else {
+          trades[trades.length - 1].skipReason = "edge_below_threshold";
+        }
         continue;
       }
       if (!dryRun) {

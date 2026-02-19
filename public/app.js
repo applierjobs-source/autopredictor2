@@ -115,7 +115,7 @@ function renderEvents(runLookup) {
       trade?.noaa?.highTemp !== undefined ? trade.noaa.highTemp : "—";
     const divergence =
       trade?.divergence !== undefined && trade?.divergence !== null
-        ? trade.divergence.toFixed(1)
+        ? trade.divergence.toFixed(2)
         : "—";
     const edge =
       trade?.edge !== undefined && trade?.edge !== null
