@@ -73,7 +73,10 @@ app.get("/api/bets/expiring-today", async (req, res) => {
 
 app.get("/api/climate/events", async (req, res) => {
   try {
-    const useSandbox = parseBoolean(req.query?.sandbox) || sandboxByDefault;
+    const useSandbox =
+      req.query?.sandbox !== undefined
+        ? parseBoolean(req.query?.sandbox)
+        : sandboxByDefault;
     const daysAhead = parseInteger(req.query?.daysAhead, 1);
     const events = await getClimateDailyEvents({ useSandbox, daysAhead });
     const payload = events.map((event) => ({
@@ -100,7 +103,10 @@ app.get("/api/climate/events", async (req, res) => {
 
 app.get("/api/kalshi/series", async (req, res) => {
   try {
-    const useSandbox = parseBoolean(req.query?.sandbox) || sandboxByDefault;
+    const useSandbox =
+      req.query?.sandbox !== undefined
+        ? parseBoolean(req.query?.sandbox)
+        : sandboxByDefault;
     const category = req.query?.category || undefined;
     const series = await getSeriesList({ category, useSandbox });
     const payload = series.map((item) => ({
@@ -122,7 +128,10 @@ app.get("/api/kalshi/series", async (req, res) => {
 
 app.get("/api/kalshi/series/:ticker/events", async (req, res) => {
   try {
-    const useSandbox = parseBoolean(req.query?.sandbox) || sandboxByDefault;
+    const useSandbox =
+      req.query?.sandbox !== undefined
+        ? parseBoolean(req.query?.sandbox)
+        : sandboxByDefault;
     const seriesTicker = req.params.ticker;
     const events = await getEventsForSeries(seriesTicker, { useSandbox });
     const payload = events.slice(0, 50).map((event) => ({
@@ -176,7 +185,10 @@ app.post("/api/trade", async (req, res) => {
 
 app.post("/api/trade/highest-odds", async (req, res) => {
   const amountCents = Number(req.body?.amountCents || tradeAmountCents);
-  const useSandbox = parseBoolean(req.body?.sandbox) || sandboxByDefault;
+  const useSandbox =
+    req.body?.sandbox !== undefined
+      ? parseBoolean(req.body?.sandbox)
+      : sandboxByDefault;
 
   try {
     const trade = await placeHighestOddsTrade({ amountCents, useSandbox });
@@ -195,8 +207,14 @@ app.post("/api/trade/highest-odds", async (req, res) => {
 app.post("/api/trade/climate-daily", async (req, res) => {
   try {
     const amountCents = Number(req.body?.amountCents || 0) || undefined;
-    const useSandbox = parseBoolean(req.body?.sandbox) || sandboxByDefault;
-    const dryRun = parseBoolean(req.body?.dryRun) || dryRunByDefault;
+    const useSandbox =
+      req.body?.sandbox !== undefined
+        ? parseBoolean(req.body?.sandbox)
+        : sandboxByDefault;
+    const dryRun =
+      req.body?.dryRun !== undefined
+        ? parseBoolean(req.body?.dryRun)
+        : dryRunByDefault;
     const daysAhead = parseInteger(req.body?.daysAhead, 1);
     const trades = await placeClimateDailyTrades({
       amountCents,
