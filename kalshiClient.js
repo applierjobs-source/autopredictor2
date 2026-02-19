@@ -196,7 +196,7 @@ const CITY_GEOCODES = [
   { name: "New York City", aliases: ["nyc", "new york city", "new york"], geocode: "40.7128,-74.0060" },
   { name: "Chicago", aliases: ["chicago"], geocode: "41.8781,-87.6298" },
   { name: "Miami", aliases: ["miami"], geocode: "25.7617,-80.1918" },
-  { name: "Los Angeles", aliases: ["los angeles", "la"], geocode: "34.0522,-118.2437" },
+  { name: "Los Angeles", aliases: ["los angeles"], geocode: "34.0522,-118.2437" },
   { name: "Phoenix", aliases: ["phoenix"], geocode: "33.4484,-112.0740" },
   { name: "Denver", aliases: ["denver"], geocode: "39.7392,-104.9903" },
   { name: "Austin", aliases: ["austin"], geocode: "30.2672,-97.7431" },
@@ -297,9 +297,21 @@ function extractEventDate(event) {
 
 function findCityFromTitle(title) {
   const normalized = normalizeText(title);
-  return CITY_GEOCODES.find((entry) =>
-    entry.aliases.some((alias) => normalized.includes(alias))
-  );
+  const candidates = CITY_GEOCODES.flatMap((entry) =>
+    entry.aliases.map((alias) => ({
+      entry,
+      alias,
+      aliasKey: normalizeText(alias),
+    }))
+  ).sort((a, b) => b.aliasKey.length - a.aliasKey.length);
+
+  for (const candidate of candidates) {
+    const pattern = new RegExp(`\\b${candidate.aliasKey}\\b`, "i");
+    if (pattern.test(normalized)) {
+      return candidate.entry;
+    }
+  }
+  return null;
 }
 
 function parseTemperatureRange(label) {
@@ -638,12 +650,20 @@ async function getWeatherForecastForCity(title) {
 
   const data = primary.data;
 
-  const highTemp = Array.isArray(data?.temperatureMax)
-    ? data.temperatureMax[0]
-    : data?.temperatureMax;
-  const lowTemp = Array.isArray(data?.temperatureMin)
-    ? data.temperatureMin[0]
-    : data?.temperatureMin;
+  const fromArray = (value) =>
+    Array.isArray(value) ? value[0] : value;
+  const daypart = Array.isArray(data?.daypart) ? data.daypart[0] : null;
+  const daypartTemp = daypart ? fromArray(daypart.temperature) : null;
+  const daypartTempMin = daypart ? fromArray(daypart.temperatureMin) : null;
+
+  const highTemp =
+    fromArray(data?.temperatureMax) ??
+    fromArray(data?.calendarDayTemperatureMax) ??
+    daypartTemp;
+  const lowTemp =
+    fromArray(data?.temperatureMin) ??
+    fromArray(data?.calendarDayTemperatureMin) ??
+    daypartTempMin;
 
   return {
     city: match.name,
