@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const fs = require("fs");
 
 const API_BASE = process.env.KALSHI_API_BASE || "https://api.kalshi.com";
 const SANDBOX_API_BASE = process.env.KALSHI_SANDBOX_API_BASE;
@@ -34,6 +35,19 @@ const WEATHERCOMPANY_USER_AGENT =
 const WEATHERCOMPANY_DAILY_DAYS = Number(
   process.env.WEATHERCOMPANY_DAILY_DAYS || 7
 );
+const NOAA_NWS_BASE = process.env.NOAA_NWS_BASE || "https://api.weather.gov";
+const NOAA_USER_AGENT =
+  process.env.NOAA_USER_AGENT || "AutoPredictor/1.0 (contact@example.com)";
+const NOAA_HISTORY_DAYS = Number(process.env.NOAA_HISTORY_DAYS || 30);
+const NOAA_MODEL_MAX_SAMPLES = Number(
+  process.env.NOAA_MODEL_MAX_SAMPLES || 30
+);
+const NOAA_STD_DEFAULT = Number(process.env.NOAA_STD_DEFAULT || 4);
+const TWC_STD_DEFAULT = Number(process.env.TWC_STD_DEFAULT || 4);
+const NOAA_WEIGHT = Number(process.env.NOAA_WEIGHT || 0.5);
+const TWC_WEIGHT = Number(process.env.TWC_WEIGHT || 0.5);
+const EDGE_THRESHOLD = Number(process.env.KALSHI_EDGE_THRESHOLD || 0.03);
+const FEE_BUFFER = Number(process.env.KALSHI_FEE_BUFFER || 0.01);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const KALSHI_MAX_RETRIES = Number(process.env.KALSHI_MAX_RETRIES || 3);
@@ -46,9 +60,33 @@ const CLIMATE_EVENTS_CACHE_TTL_MS = Number(
 const CLIMATE_MAX_SERIES = Number(process.env.CLIMATE_MAX_SERIES || 20);
 
 const climateEventsCache = new Map();
+const noaaModelPath = `${__dirname}/data/noaa-error-model.json`;
+const noaaForecastHistoryPath = `${__dirname}/data/noaa-forecast-history.json`;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function ensureDataDir() {
+  const dir = `${__dirname}/data`;
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function loadJson(path, fallback) {
+  try {
+    if (!fs.existsSync(path)) return fallback;
+    const raw = fs.readFileSync(path, "utf-8");
+    return JSON.parse(raw);
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function saveJson(path, value) {
+  ensureDataDir();
+  fs.writeFileSync(path, JSON.stringify(value, null, 2));
 }
 
 function getPrivateKey(useSandbox) {
@@ -92,6 +130,38 @@ function toNumber(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toNumberOrZero(value) {
+  const parsed = toNumber(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalCdf(x) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989423 * Math.exp((-x * x) / 2);
+  let prob =
+    d *
+    t *
+    (0.3193815 +
+      t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  if (x > 0) prob = 1 - prob;
+  return prob;
+}
+
+function normalRangeProbability(mean, std, range) {
+  if (!range) return null;
+  if (!Number.isFinite(mean) || !Number.isFinite(std) || std <= 0) return null;
+  const zMin = Number.isFinite(range.min)
+    ? (range.min - mean) / std
+    : null;
+  const zMax = Number.isFinite(range.max)
+    ? (range.max - mean) / std
+    : null;
+  if (zMin === null && zMax === null) return null;
+  if (zMin === null) return normalCdf(zMax);
+  if (zMax === null) return 1 - normalCdf(zMin);
+  return Math.max(0, normalCdf(zMax) - normalCdf(zMin));
 }
 
 function formatDateInTimeZone(date, timeZone) {
@@ -174,6 +244,16 @@ function extractYesPriceDollars(market) {
     toNumber(market?.last_price) ??
     null
   );
+}
+
+function extractImpliedProbability(market) {
+  const price =
+    toNumber(market?.yes_ask_dollars) ??
+    toNumber(market?.last_price_dollars) ??
+    toNumber(market?.yes_ask) ??
+    toNumber(market?.last_price);
+  if (!Number.isFinite(price)) return null;
+  return Math.max(0, Math.min(1, price));
 }
 
 function formatPriceDollars(value) {
@@ -328,6 +408,16 @@ function parseTemperatureRange(label) {
   if (aboveMatch) {
     return { min: Number(aboveMatch[1]), max: Number.POSITIVE_INFINITY };
   }
+  return null;
+}
+
+function rangeStrike(range) {
+  if (!range) return null;
+  if (Number.isFinite(range.min) && Number.isFinite(range.max)) {
+    return (range.min + range.max) / 2;
+  }
+  if (Number.isFinite(range.min)) return range.min;
+  if (Number.isFinite(range.max)) return range.max;
   return null;
 }
 
@@ -674,6 +764,160 @@ async function getWeatherForecastForCity(title) {
   };
 }
 
+async function fetchNwsJson(url) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": NOAA_USER_AGENT,
+      Accept: "application/geo+json",
+    },
+  });
+  if (!response.ok) {
+    const error = new Error("NOAA NWS request failed");
+    error.details = { status: response.status, body: await response.text() };
+    throw error;
+  }
+  return response.json();
+}
+
+async function getNwsPoint(geocode) {
+  const url = `${NOAA_NWS_BASE}/points/${geocode}`;
+  return fetchNwsJson(url);
+}
+
+async function getNwsForecastHigh(geocode, targetDate) {
+  const point = await getNwsPoint(geocode);
+  const forecastUrl = point?.properties?.forecast;
+  if (!forecastUrl) {
+    throw new Error("NOAA forecast URL missing");
+  }
+  const forecast = await fetchNwsJson(forecastUrl);
+  const periods = forecast?.properties?.periods || [];
+  const targetKey = formatDateInTimeZone(targetDate, "UTC");
+  const target = periods.find((period) => {
+    const startKey = formatDateInTimeZone(new Date(period.startTime), "UTC");
+    return startKey === targetKey && period.isDaytime;
+  });
+  const fallback = periods.find((period) => {
+    const startKey = formatDateInTimeZone(new Date(period.startTime), "UTC");
+    return startKey === targetKey;
+  });
+  const selected = target || fallback;
+  return selected?.temperature ?? null;
+}
+
+async function getNwsStationId(geocode) {
+  const point = await getNwsPoint(geocode);
+  const stationsUrl = point?.properties?.observationStations;
+  if (!stationsUrl) return null;
+  const stations = await fetchNwsJson(stationsUrl);
+  const station = Array.isArray(stations?.features) ? stations.features[0] : null;
+  return station?.properties?.stationIdentifier || null;
+}
+
+async function getNwsObservations(stationId, startDate, endDate) {
+  const startIso = startDate.toISOString();
+  const endIso = endDate.toISOString();
+  const url = `${NOAA_NWS_BASE}/stations/${stationId}/observations?start=${startIso}&end=${endIso}&limit=500`;
+  const data = await fetchNwsJson(url);
+  return Array.isArray(data?.features) ? data.features : [];
+}
+
+function celsiusToFahrenheit(valueC) {
+  if (!Number.isFinite(valueC)) return null;
+  return (valueC * 9) / 5 + 32;
+}
+
+function dailyMaxFromObservations(observations) {
+  const byDate = {};
+  observations.forEach((obs) => {
+    const time = obs?.properties?.timestamp;
+    const tempC = obs?.properties?.temperature?.value;
+    if (!time || tempC === null || tempC === undefined) return;
+    const tempF = celsiusToFahrenheit(tempC);
+    if (!Number.isFinite(tempF)) return;
+    const dateKey = formatDateInTimeZone(new Date(time), "UTC");
+    const current = byDate[dateKey];
+    byDate[dateKey] = Number.isFinite(current) ? Math.max(current, tempF) : tempF;
+  });
+  return byDate;
+}
+
+function updateErrorModel(model, stationId, forecastHistory, dailyObs) {
+  const station = model[stationId] || { samples: [], processed: {} };
+  Object.keys(forecastHistory || {}).forEach((dateKey) => {
+    if (station.processed[dateKey]) return;
+    const forecastHigh = forecastHistory[dateKey];
+    const observedHigh = dailyObs[dateKey];
+    if (!Number.isFinite(forecastHigh) || !Number.isFinite(observedHigh)) return;
+    const error = observedHigh - forecastHigh;
+    station.samples.push(error);
+    if (station.samples.length > NOAA_MODEL_MAX_SAMPLES) {
+      station.samples = station.samples.slice(-NOAA_MODEL_MAX_SAMPLES);
+    }
+    station.processed[dateKey] = true;
+  });
+
+  const mean =
+    station.samples.reduce((acc, val) => acc + val, 0) /
+    (station.samples.length || 1);
+  const variance =
+    station.samples.reduce((acc, val) => acc + (val - mean) ** 2, 0) /
+    (station.samples.length || 1);
+  station.bias = mean;
+  station.std = Math.sqrt(variance);
+  model[stationId] = station;
+  return model;
+}
+
+async function getNoaaForecastAndModel(title) {
+  const city = findCityFromTitle(title);
+  if (!city) {
+    const error = new Error("Unable to map city from event title");
+    error.details = { title };
+    throw error;
+  }
+  const geocode = city.geocode;
+  const targetDate = new Date();
+  targetDate.setUTCDate(targetDate.getUTCDate() + 1);
+  const forecastHigh = await getNwsForecastHigh(geocode, targetDate);
+  const stationId = await getNwsStationId(geocode);
+
+  let model = loadJson(noaaModelPath, {});
+  let history = loadJson(noaaForecastHistoryPath, {});
+
+  if (stationId) {
+    const stationHistory = history[stationId] || {};
+    const dateKey = formatDateInTimeZone(targetDate, "UTC");
+    if (Number.isFinite(forecastHigh)) {
+      stationHistory[dateKey] = forecastHigh;
+      history[stationId] = stationHistory;
+      saveJson(noaaForecastHistoryPath, history);
+    }
+
+    const startDate = new Date();
+    startDate.setUTCDate(startDate.getUTCDate() - NOAA_HISTORY_DAYS);
+    const endDate = new Date();
+    const observations = await getNwsObservations(stationId, startDate, endDate);
+    const dailyObs = dailyMaxFromObservations(observations);
+    model = updateErrorModel(model, stationId, stationHistory, dailyObs);
+    saveJson(noaaModelPath, model);
+  }
+
+  const stationModel = stationId ? model[stationId] : null;
+  const bias = toNumberOrZero(stationModel?.bias);
+  const std = Number.isFinite(stationModel?.std) && stationModel.std > 0
+    ? stationModel.std
+    : NOAA_STD_DEFAULT;
+
+  return {
+    city: city.name,
+    geocode,
+    forecastHigh: toNumber(forecastHigh),
+    bias,
+    std,
+  };
+}
+
 async function pickMarketWithOpenAI({ eventTitle, markets, forecast }) {
   if (!OPENAI_API_KEY) return null;
   if (!Array.isArray(markets) || markets.length === 0) return null;
@@ -740,29 +984,101 @@ async function decideClimateMarketForEvent(event) {
   }
 
   const forecast = await getWeatherForecastForCity(event?.title || "");
+  const noaa = await getNoaaForecastAndModel(event?.title || "");
   const forecastValue = selectForecastValue(event?.title, forecast);
-  let chosen = pickMarketByForecast(markets, forecastValue);
-  const aiTicker = await pickMarketWithOpenAI({
-    eventTitle: event?.title,
-    markets,
-    forecast: {
-      ...forecast,
-      targetValue: forecastValue,
-    },
+  const noaaValue = selectForecastValue(event?.title, {
+    highTemp: noaa.forecastHigh,
+    lowTemp: noaa.forecastHigh,
   });
 
-  if (aiTicker) {
-    const aiMarket = markets.find((market) => market.ticker === aiTicker);
-    if (aiMarket) chosen = aiMarket;
-  }
+  const weightSum = NOAA_WEIGHT + TWC_WEIGHT;
+  const noaaWeight = weightSum > 0 ? NOAA_WEIGHT / weightSum : 0.5;
+  const twcWeight = weightSum > 0 ? TWC_WEIGHT / weightSum : 0.5;
 
-  if (!chosen) {
-    const error = new Error("Unable to choose market");
+  let bestEdge = -Infinity;
+  let bestMeta = null;
+
+  markets.forEach((market) => {
+    const range = parseTemperatureRange(
+      market?.yes_sub_title || market?.title || market?.ticker
+    );
+    if (!range) return;
+    const implied = extractImpliedProbability(market);
+    if (!Number.isFinite(implied)) return;
+
+    const noaaMean = Number.isFinite(noaaValue) ? noaaValue + noaa.bias : null;
+    const twcMean = Number.isFinite(forecastValue) ? forecastValue : null;
+
+    const noaaProb = Number.isFinite(noaaMean)
+      ? normalRangeProbability(noaaMean, noaa.std, range)
+      : null;
+    const twcProb = Number.isFinite(twcMean)
+      ? normalRangeProbability(twcMean, TWC_STD_DEFAULT, range)
+      : null;
+    if (noaaProb === null && twcProb === null) return;
+
+    const combined =
+      (Number.isFinite(noaaProb) ? noaaProb * noaaWeight : 0) +
+      (Number.isFinite(twcProb) ? twcProb * twcWeight : 0);
+    const edge = combined - implied - FEE_BUFFER;
+
+    if (edge > bestEdge) {
+      bestEdge = edge;
+      bestMeta = {
+        market,
+        range,
+        implied,
+        combined,
+        noaaProb,
+        twcProb,
+      };
+    }
+  });
+
+  if (!bestMeta) {
+    const error = new Error("No market with valid probabilities");
     error.details = { eventTicker: event?.event_ticker };
     throw error;
   }
 
-  return { chosen, forecast, aiTicker };
+  const chosen = bestMeta.market;
+  const strike = rangeStrike(bestMeta.range);
+  const divergence =
+    Number.isFinite(forecastValue) && Number.isFinite(noaaValue)
+      ? forecastValue - noaaValue
+      : null;
+  const withinStrike =
+    Number.isFinite(strike) &&
+    (Number.isFinite(forecastValue) || Number.isFinite(noaaValue)) &&
+    Math.min(
+      Number.isFinite(forecastValue)
+        ? Math.abs(forecastValue - strike)
+        : Infinity,
+      Number.isFinite(noaaValue) ? Math.abs(noaaValue - strike) : Infinity
+    ) <= 3;
+  const disagree =
+    Number.isFinite(forecastValue) &&
+    Number.isFinite(noaaValue) &&
+    Math.abs(forecastValue - noaaValue) >= 2;
+
+  const edgeRequired = Math.max(EDGE_THRESHOLD, FEE_BUFFER);
+  const shouldTrade = bestEdge >= edgeRequired;
+
+  return {
+    chosen,
+    forecast,
+    noaa,
+    impliedProbability: bestMeta.implied,
+    combinedProbability: bestMeta.combined,
+    noaaProbability: bestMeta.noaaProb,
+    twcProbability: bestMeta.twcProb,
+    edge: bestEdge,
+    edgeRequired,
+    divergence,
+    withinStrike,
+    disagree,
+    shouldTrade,
+  };
 }
 
 async function placeClimateDailyTrades({
@@ -807,10 +1123,29 @@ async function placeClimateDailyTrades({
           lowTemp: decision.forecast?.lowTemp,
           city: decision.forecast?.city,
         },
+        noaa: {
+          highTemp: decision.noaa?.forecastHigh,
+          bias: decision.noaa?.bias,
+          std: decision.noaa?.std,
+        },
+        divergence: decision.divergence,
+        impliedProbability: decision.impliedProbability,
+        combinedProbability: decision.combinedProbability,
+        noaaProbability: decision.noaaProbability,
+        twcProbability: decision.twcProbability,
+        edge: decision.edge,
+        edgeRequired: decision.edgeRequired,
+        withinStrike: decision.withinStrike,
+        disagree: decision.disagree,
         dryRun,
         priceDollars,
         amountCents: amountCents || CLIMATE_TRADE_AMOUNT_CENTS,
       });
+      if (!decision.shouldTrade) {
+        trades[trades.length - 1].skipped = true;
+        trades[trades.length - 1].skipReason = "edge_below_threshold";
+        continue;
+      }
       if (!dryRun) {
         const trade = await placeKalshiTrade({
           amountCents: amountCents || CLIMATE_TRADE_AMOUNT_CENTS,

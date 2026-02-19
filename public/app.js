@@ -111,6 +111,16 @@ function renderEvents(runLookup) {
       trade?.forecast?.highTemp !== undefined ? trade.forecast.highTemp : "—";
     const forecastLow =
       trade?.forecast?.lowTemp !== undefined ? trade.forecast.lowTemp : "—";
+    const noaaHigh =
+      trade?.noaa?.highTemp !== undefined ? trade.noaa.highTemp : "—";
+    const divergence =
+      trade?.divergence !== undefined && trade?.divergence !== null
+        ? trade.divergence.toFixed(1)
+        : "—";
+    const edge =
+      trade?.edge !== undefined && trade?.edge !== null
+        ? (trade.edge * 100).toFixed(1) + "%"
+        : "—";
 
     row.innerHTML = `
       <td>${formatCell(event.eventTicker)}</td>
@@ -118,6 +128,9 @@ function renderEvents(runLookup) {
       <td>${formatCell(event.title)}</td>
       <td>${formatCell(forecastHigh)}</td>
       <td>${formatCell(forecastLow)}</td>
+      <td>${formatCell(noaaHigh)}</td>
+      <td>${formatCell(divergence)}</td>
+      <td>${formatCell(edge)}</td>
       <td>${formatCell(marketLabels)}</td>
     `;
     eventsBodyEl.appendChild(row);
