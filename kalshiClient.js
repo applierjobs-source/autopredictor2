@@ -646,6 +646,10 @@ async function getClimateDailyEvents({
 
   if (!events.length) {
     const upcoming = [];
+    const windowStart = new Date(targetDate);
+    windowStart.setHours(0, 0, 0, 0);
+    const windowEnd = new Date(windowStart);
+    windowEnd.setDate(windowEnd.getDate() + 2);
     for (const entry of limitedSeries) {
       const seriesEvents = await getEventsForSeries(entry.ticker, {
         useSandbox,
@@ -658,6 +662,7 @@ async function getClimateDailyEvents({
         const eventDate =
           extractEventDate(event) || (closeAt ? new Date(closeAt) : null);
         if (!eventDate) return;
+        if (eventDate < windowStart || eventDate > windowEnd) return;
         upcoming.push({ event, closeAt: eventDate.toISOString() });
       });
       await sleep(60);
